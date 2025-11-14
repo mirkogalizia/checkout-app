@@ -1,310 +1,122 @@
-"use client";
+"use client"
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import CheckoutLayout from "../../components/CheckoutLayout"
+import Summary from "../../components/Summary"
 
-type StripeAccountInput = {
-  label: string;
-  name: string;
-};
+// Wrapper richiesto da Next per usare useSearchParams
+export default function CheckoutPage() {
+  return (
+    <Suspense
+      fallback={
+        <CheckoutLayout>
+          <div className="py-20 text-center text-sm text-gray-500">
+            Caricamento checkout…
+          </div>
+        </CheckoutLayout>
+      }
+    >
+      <CheckoutClient />
+    </Suspense>
+  )
+}
 
-const STRIPE_ACCOUNTS: StripeAccountInput[] = [
-  { label: "Account 1", name: "account1" },
-  { label: "Account 2", name: "account2" },
-  { label: "Account 3", name: "account3" },
-  { label: "Account 4", name: "account4" },
-];
+// Componente "client" che usa davvero useSearchParams
+function CheckoutClient() {
+  const searchParams = useSearchParams()
+  const sessionId = searchParams.get("sessionId")
 
-export default function OnboardingPage() {
-  const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [cart, setCart] = useState<any | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setLoading(true);
-    setSaved(false);
-    setError(null);
-
-    const formData = new FormData(e.currentTarget);
-
-    const payload = {
-      shopifyDomain: formData.get("shopifyDomain") as string,
-      shopifyAdminToken: formData.get("shopifyAdminToken") as string,
-      shopifyStorefrontToken: formData.get("shopifyStorefrontToken") as string,
-      stripeAccounts: STRIPE_ACCOUNTS.map((acc, index) => ({
-        label: formData.get(`${acc.name}-label`) as string,
-        secretKey: formData.get(`${acc.name}-secret`) as string,
-        webhookSecret: formData.get(`${acc.name}-webhook`) as string,
-        active: formData.get(`${acc.name}-active`) === "on",
-        order: index,
-      })),
-      defaultCurrency: (formData.get("defaultCurrency") as string) || "EUR",
-    };
-
-    try {
-      const res = await fetch("/api/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || "Errore salvataggio configurazione");
+  useEffect(() => {
+    async function load() {
+      if (!sessionId) {
+        setError("Sessione di checkout non valida")
+        setLoading(false)
+        return
       }
 
-      setSaved(true);
-    } catch (err: any) {
-      setError(err.message ?? "Errore imprevisto");
-    } finally {
-      setLoading(false);
+      try {
+        const url = `/api/cart-session?sessionId=${encodeURIComponent(
+          sessionId || ""
+        )}`
+        const res = await fetch(url)
+        const data = await res.json()
+
+        if (!res.ok) {
+          throw new Error(data.error || "Errore nel recupero del carrello")
+        }
+
+        setCart(data.cart)
+      } catch (err: any) {
+        console.error("Checkout load error:", err)
+        setError(err.message || "Errore sconosciuto")
+      } finally {
+        setLoading(false)
+      }
     }
-  }
+
+    load()
+  }, [sessionId])
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
-      <div className="max-w-6xl w-full space-y-8">
-        {/* Header */}
-        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-xs text-slate-300 backdrop-blur-md">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Setup iniziale • Checkout Hub
-            </div>
-            <h1 className="mt-4 text-3xl md:text-4xl font-semibold tracking-tight text-slate-50">
-              Collega Shopify, Stripe e Firebase
-            </h1>
-            <p className="mt-2 text-sm text-slate-400 max-w-xl">
-              Configura una sola volta, poi il tuo checkout custom gestirà in automatico
-              carrelli, pagamenti multi-account Stripe e sincronizzazione ordini.
-            </p>
-          </div>
-
-          <div className="glass-card px-4 py-3 flex flex-col gap-1 md:w-72">
-            <p className="text-xs font-medium text-slate-300">
-              Stato onboarding
-            </p>
-            <p className="text-sm text-slate-400">
-              Completa i campi essenziali e salva la configurazione. I dati vengono
-              memorizzati in Firebase e riutilizzati dal backend.
-            </p>
-          </div>
-        </header>
-
-        {/* Layout principale */}
-        <form
-          onSubmit={handleSubmit}
-          className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start"
-        >
-          {/* Colonna sinistra: Shopify + Stripe */}
-          <div className="space-y-6">
-            {/* Shopify card */}
-            <section className="glass-card p-6 md:p-7 space-y-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="glass-label">Sorgente carrelli</p>
-                  <h2 className="text-lg font-semibold text-slate-50 flex items-center gap-2">
-                    Shopify
-                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 border border-emerald-500/30">
-                      Live ready
-                    </span>
-                  </h2>
-                </div>
-                <div className="text-right text-[11px] text-slate-400">
-                  <p>Usa app privata + Storefront API</p>
-                  <p>Scoped solo a ordini & prodotti</p>
-                </div>
-              </div>
-
-              <div className="grid gap-4">
-                <div>
-                  <label className="glass-label">Shopify Store Domain</label>
-                  <input
-                    name="shopifyDomain"
-                    className="glass-input"
-                    placeholder="es. imjsqk-my.myshopify.com"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="glass-label">Admin API Token</label>
-                  <input
-                    name="shopifyAdminToken"
-                    type="password"
-                    className="glass-input"
-                    placeholder="shpat_********"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="glass-label">Storefront API Token</label>
-                  <input
-                    name="shopifyStorefrontToken"
-                    type="password"
-                    className="glass-input"
-                    placeholder="Storefront token per leggere il carrello/prodotti"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="glass-label">Valuta di default</label>
-                    <input
-                      name="defaultCurrency"
-                      className="glass-input"
-                      defaultValue="EUR"
-                      placeholder="EUR"
+    <CheckoutLayout>
+      {loading ? (
+        <div className="py-20 text-center text-sm text-gray-500">
+          Caricamento carrello…
+        </div>
+      ) : error ? (
+        <div className="py-20 text-center text-sm text-red-600">
+          {error}
+        </div>
+      ) : !cart ? (
+        <div className="py-20 text-center text-sm text-gray-500">
+          Nessun carrello trovato.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[2fr,1fr] gap-8 py-8">
+          {/* Colonna prodotti */}
+          <section className="space-y-4">
+            <h1 className="text-xl font-semibold">Riepilogo prodotti</h1>
+            <div className="space-y-3">
+              {cart.items?.map((item: any) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 bg-white rounded-xl shadow-sm p-3"
+                >
+                  {item.image && (
+                    <img
+                      src={item.image}
+                      alt={item.title}
+                      className="w-16 h-16 object-cover rounded-lg border"
                     />
-                  </div>
-                  <div className="text-[11px] text-slate-400 flex items-end">
-                    Usata se il carrello non espone una currency esplicita.
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Stripe accounts card */}
-            <section className="glass-card p-6 md:p-7 space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="glass-label">Gateway di pagamento</p>
-                  <h2 className="text-lg font-semibold text-slate-50 flex items-center gap-2">
-                    Stripe multi-account
-                  </h2>
-                </div>
-                <div className="text-right text-[11px] text-slate-400">
-                  <p>Fino a 4 account Stripe</p>
-                  <p>Round-robin sui soli account attivi</p>
-                </div>
-              </div>
-
-              <div className="grid gap-4">
-                {STRIPE_ACCOUNTS.map((acc, index) => (
-                  <div
-                    key={acc.name}
-                    className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-200">
-                          {acc.label}
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          Opzionale. Puoi anche usarne solo uno.
-                        </p>
+                  )}
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">{item.title}</div>
+                    {item.variantTitle && (
+                      <div className="text-xs text-gray-500">
+                        {item.variantTitle}
                       </div>
-                      <label className="inline-flex items-center gap-2 text-[11px] text-slate-300">
-                        <input
-                          type="checkbox"
-                          name={`${acc.name}-active`}
-                          defaultChecked={index === 0}
-                          className="h-3.5 w-3.5 rounded border-white/30 bg-slate-900/60"
-                        />
-                        Attivo
-                      </label>
-                    </div>
-
-                    <div className="grid gap-3">
-                      <div>
-                        <label className="glass-label">Label interna</label>
-                        <input
-                          name={`${acc.name}-label`}
-                          className="glass-input"
-                          placeholder={`es. Stripe NFR ${index + 1}`}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="glass-label">Secret Key</label>
-                        <input
-                          name={`${acc.name}-secret`}
-                          type="password"
-                          className="glass-input"
-                          placeholder="sk_live_*** o sk_test_***"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="glass-label">Webhook Secret</label>
-                        <input
-                          name={`${acc.name}-webhook`}
-                          type="password"
-                          className="glass-input"
-                          placeholder="whsec_*** (opzionale ma consigliato)"
-                        />
-                      </div>
+                    )}
+                    <div className="text-xs text-gray-500">
+                      Quantità: {item.quantity}
                     </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          {/* Colonna destra: Firebase + azioni */}
-          <aside className="space-y-4">
-            {/* Firebase info */}
-            <section className="glass-card p-5 md:p-6 space-y-3">
-              <p className="glass-label">Storage configurazione</p>
-              <h2 className="text-base font-semibold text-slate-50 flex items-center gap-2">
-                Firebase Firestore
-              </h2>
-              <p className="text-sm text-slate-400">
-                I dati inseriti qui vengono salvati su Firestore (collezione tipo
-                <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-black/40 border border-white/5 ml-1">
-                  appConfig
-                </span>
-                ) e letti dalle API:
-              </p>
-              <ul className="text-[11px] text-slate-400 space-y-1.5">
-                <li>• <code className="font-mono">/api/cart-session</code></li>
-                <li>• <code className="font-mono">/api/payments</code></li>
-                <li>• <code className="font-mono">/api/shopify-cart</code></li>
-                <li>• <code className="font-mono">/api/stripe</code> (webhook)</li>
-              </ul>
-            </section>
-
-            {/* Stato + pulsanti */}
-            <section className="glass-card p-5 md:p-6 space-y-4">
-              {error && (
-                <div className="rounded-2xl border border-rose-500/40 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-100">
-                  {error}
+                  <div className="text-sm font-semibold">
+                    {((item.price ?? 0) / 100).toFixed(2)} €
+                  </div>
                 </div>
-              )}
-              {saved && !error && (
-                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/60 px-3 py-2 text-[11px] text-emerald-100">
-                  Configurazione salvata correttamente.
-                </div>
-              )}
+              ))}
+            </div>
+          </section>
 
-              <div className="space-y-2">
-                <button
-                  type="submit"
-                  className="glass-button-primary w-full"
-                  disabled={loading}
-                >
-                  {loading ? "Salvataggio in corso…" : "Salva configurazione"}
-                </button>
-                <button
-                  type="button"
-                  className="glass-button w-full text-xs"
-                  onClick={() => window.open("/checkout", "_blank")}
-                >
-                  Apri anteprima checkout
-                </button>
-              </div>
-
-              <p className="text-[11px] text-slate-500">
-                Puoi modificare questi valori in qualsiasi momento. Le nuove config
-                verranno usate dalle prossime sessioni di checkout.
-              </p>
-            </section>
-          </aside>
-        </form>
-      </div>
-    </main>
-  );
+          {/* Colonna riepilogo + pagamento */}
+          <Summary cart={cart} />
+        </div>
+      )}
+    </CheckoutLayout>
+  )
 }
