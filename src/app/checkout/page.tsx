@@ -1,219 +1,84 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import CheckoutLayout from "@/components/CheckoutLayout"
 import Summary from "@/components/Summary"
 
-type RawItem = {
-  key?: string
-  id?: number
-  title?: string
-  product_title?: string
-  variant_title?: string
-  quantity?: number
-  price?: number        // centesimi
-  line_price?: number   // centesimi
-  final_price?: number
-  final_line_price?: number
-  discounted_price?: number
-  discounted_price_set?: any
-  image?: string
-  sku?: string
-  properties?: any
-}
-
-type NormalizedItem = {
-  key: string
+type CheckoutItem = {
+  id: number
   title: string
-  variantTitle: string
+  variant_title?: string
   quantity: number
-  unitPriceCents: number
-  linePriceCents: number
+  price: number // centesimi
+  line_price?: number // centesimi
   image?: string
 }
 
-type CheckoutData = {
-  sessionId: string
+type CartSession = {
+  items: CheckoutItem[]
+  subtotal: number // centesimi
+  total: number // centesimi
   currency: string
-  subtotalCents: number
-  items: NormalizedItem[]
-}
-
-function formatMoney(amount: number, currency: string) {
-  const value = amount / 100
-  return `${value.toFixed(2)} ${currency.toUpperCase()}`
-}
-
-/**
- * Normalizza la risposta di /api/cart-session in un formato coerente,
- * indipendentemente da come il backend ha salvato i dati.
- */
-function normalizeSession(raw: any): CheckoutData {
-  const sessionId =
-    raw.sessionId ||
-    raw.id ||
-    raw.uid ||
-    "" // tanto lo abbiamo già dalla querystring
-
-  const currency =
-    (raw.currency ||
-      raw.cart?.currency ||
-      raw.cart?.presentment_currency ||
-      "EUR") as string
-
-  // Sorgenti possibili per gli items
-  const itemsRaw: RawItem[] =
-    raw.items ||
-    raw.cart?.items ||
-    raw.cart?.line_items ||
-    []
-
-  // Sorgenti possibili per il subtotale in centesimi
-  let subtotalCents: number | null = null
-
-  if (typeof raw.subtotalCents === "number") {
-    subtotalCents = raw.subtotalCents
-  } else if (typeof raw.subtotal === "number") {
-    subtotalCents = raw.subtotal
-  } else if (typeof raw.cart?.items_subtotal_price === "number") {
-    subtotalCents = raw.cart.items_subtotal_price
-  } else if (typeof raw.cart?.total_price === "number") {
-    // fallback: totale carrello
-    subtotalCents = raw.cart.total_price
-  }
-
-  const normalizedItems: NormalizedItem[] = itemsRaw.map((item, index) => {
-    const quantity = item.quantity ?? 1
-
-    const linePriceCandidate =
-      item.line_price ??
-      item.final_line_price ??
-      (typeof item.price === "number" ? item.price * quantity : undefined) ??
-      (typeof item.final_price === "number"
-        ? item.final_price * quantity
-        : undefined)
-
-    const unitPriceCandidate =
-      item.price ??
-      item.final_price ??
-      (typeof linePriceCandidate === "number"
-        ? Math.round(linePriceCandidate / quantity)
-        : undefined)
-
-    const linePriceCents = typeof linePriceCandidate === "number"
-      ? linePriceCandidate
-      : 0
-
-    const unitPriceCents = typeof unitPriceCandidate === "number"
-      ? unitPriceCandidate
-      : 0
-
-    return {
-      key: item.key || String(item.id || index),
-      title: item.product_title || item.title || "Articolo",
-      variantTitle: item.variant_title || "",
-      quantity,
-      unitPriceCents,
-      linePriceCents: linePriceCents,
-      image: item.image,
-    }
-  })
-
-  // Se il subtotale non è stato trovato, lo calcoliamo sommando le righe
-  if (subtotalCents === null) {
-    subtotalCents = normalizedItems.reduce(
-      (sum, it) => sum + it.linePriceCents,
-      0,
-    )
-  }
-
-  return {
-    sessionId,
-    currency,
-    subtotalCents,
-    items: normalizedItems,
-  }
 }
 
 export default function CheckoutPage() {
-  const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId")
-
+  // 🔹 sessionId sempre string ("" = non valido)
+  const [sessionId, setSessionId] = useState<string>("")
+  const [data, setData] = useState<CartSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<CheckoutData | null>(null)
 
-  // Spedizione (per ora mockata dalla route /api/shipping)
-  const [shippingCents, setShippingCents] = useState<number>(0)
-  const [shippingLoading, setShippingLoading] = useState(false)
-  const [shippingError, setShippingError] = useState<string | null>(null)
+  // Dati form (per step successivo: salvataggio / spedizioni)
+  const [email, setEmail] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
+  const [address1, setAddress1] = useState("")
+  const [city, setCity] = useState("")
+  const [zip, setZip] = useState("")
+  const [country, setCountry] = useState("IT")
 
+  // 1) Leggo sessionId dall'URL (?sessionId=...)
   useEffect(() => {
-    async function load() {
-      if (!sessionId) {
-        setError("Sessione di checkout mancante.")
-        setLoading(false)
-        return
-      }
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get("sessionId")
+    if (!id) {
+      setError("Nessun carrello trovato.")
+      setLoading(false)
+      return
+    }
+    setSessionId(id)
+  }, [])
 
+  // 2) Quando ho sessionId, chiamo /api/cart-session
+  useEffect(() => {
+    if (!sessionId) return
+
+    async function load() {
       try {
         setLoading(true)
         setError(null)
 
-        const url = `/api/cart-session?sessionId=${encodeURIComponent(
-          sessionId,
-        )}`
-
-        const res = await fetch(url, { cache: "no-store" })
-        const raw = await res.json()
+        const res = await fetch(
+          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`
+        )
+        const json = await res.json()
 
         if (!res.ok) {
-          throw new Error(raw.error || "Errore nel recupero del carrello")
+          throw new Error(json.error || "Errore nel recupero del carrello")
         }
 
-        const normalized = normalizeSession(raw)
-        // forza il sessionId della query se il backend non lo mette
-        normalized.sessionId = sessionId
-
-        setData(normalized)
-
-        // facoltativo: calcolo spedizione subito dopo aver caricato il carrello
-        try {
-          setShippingLoading(true)
-          const shipRes = await fetch("/api/shipping", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              address: {
-                country: "IT", // per ora mock, poi useremo l'input dell'utente
-              },
-              items: normalized.items.map((it) => ({
-                quantity: it.quantity,
-              })),
-              subtotalCents: normalized.subtotalCents,
-              currency: normalized.currency,
-            }),
-          })
-
-          const shipJson = await shipRes.json()
-          if (!shipRes.ok || !shipJson.success) {
-            throw new Error(shipJson.error || "Errore calcolo spedizione")
-          }
-
-          setShippingCents(shipJson.amount || 0)
-          setShippingError(null)
-        } catch (err: any) {
-          console.error("[checkout] errore spedizione:", err)
-          setShippingCents(0)
-          setShippingError(
-            "Impossibile calcolare la spedizione. Verrà mostrato 0 per ora.",
-          )
-        } finally {
-          setShippingLoading(false)
+        const cart: CartSession = {
+          items: json.items || [],
+          subtotal: typeof json.subtotal === "number" ? json.subtotal : 0,
+          total: typeof json.total === "number" ? json.total : 0,
+          currency: json.currency || "EUR",
         }
+
+        setData(cart)
       } catch (err: any) {
-        console.error("[checkout] errore load:", err)
-        setError(err.message || "Errore nel recupero del carrello.")
+        console.error("[checkout] errore nel load:", err)
+        setError(err.message || "Errore sconosciuto")
       } finally {
         setLoading(false)
       }
@@ -222,235 +87,282 @@ export default function CheckoutPage() {
     load()
   }, [sessionId])
 
-  if (!sessionId) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl px-6 py-4">
-          <p className="text-sm">Sessione di checkout non valida.</p>
-        </div>
-      </main>
-    )
-  }
-
-  if (loading || !data) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl px-6 py-4">
-          <p className="text-sm">Caricamento del carrello…</p>
-        </div>
-      </main>
-    )
-  }
-
-  if (error) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
-        <div className="bg-red-500/10 border border-red-500/50 rounded-2xl px-6 py-4">
-          <p className="text-sm">Errore: {error}</p>
-        </div>
-      </main>
-    )
-  }
-
-  const { items, subtotalCents, currency } = data
-  const totalCents = subtotalCents + (shippingCents || 0)
+  const currency = (data?.currency || "EUR").toUpperCase()
+  const subtotalCents = data?.subtotal ?? 0
+  const totalCents = data?.total ?? 0
+  const subtotal = subtotalCents / 100
+  const total = totalCents / 100
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-5xl">
-        {/* Header stile Apple/Revolut */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center shadow-lg shadow-slate-900/70">
-              <span className="text-xs font-semibold tracking-[0.16em] uppercase text-slate-100">
-                NFR
-              </span>
+    <CheckoutLayout>
+      <div className="min-h-screen w-full bg-slate-950 text-slate-50">
+        {/* Top bar */}
+        <header className="w-full border-b border-slate-800/60 bg-gradient-to-r from-slate-950 via-slate-950/95 to-slate-900/90 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-sky-500/15 ring-1 ring-sky-500/40">
+                <span className="text-xs font-semibold text-sky-300">NF</span>
+              </div>
+              <div className="flex flex-col leading-tight">
+                <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                  Secure Checkout
+                </span>
+                <span className="text-sm font-semibold text-slate-50">
+                  Checkout App
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                Secure Checkout
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <span className="inline-flex h-6 items-center gap-1 rounded-full bg-emerald-400/10 px-2 ring-1 ring-emerald-400/40">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(74,222,128,0.9)]" />
+                <span className="font-medium text-emerald-200">Connessione sicura</span>
               </span>
-              <span className="text-sm font-medium text-slate-50">
-                Checkout Not For Resale
+              <span className="hidden sm:inline text-slate-500">
+                Pagamenti crittografati e conformi PCI-DSS
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            <span>Connessione sicura</span>
-          </div>
-        </div>
+        </header>
 
-        {/* Layout a due colonne */}
-        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-6">
-          {/* Colonna sinistra: dati e riepilogo articoli */}
-          <section className="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 md:p-6 backdrop-blur-xl shadow-[0_20px_60px_rgba(15,23,42,0.9)]">
-            <h1 className="text-lg md:text-xl font-semibold text-slate-50 mb-2">
-              Completa i dati e paga in modo sicuro.
-            </h1>
-            <p className="text-xs text-slate-400 mb-6">
-              Rivedi il riepilogo del tuo ordine e completa il pagamento con
-              carta tramite Stripe.
-            </p>
-
-            {/* Sezione: articoli nel carrello */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-medium text-slate-200">
-                  Articoli nel carrello ({items.length})
-                </h2>
-              </div>
-
-              <div className="space-y-3">
-                {items.map((item) => {
-                  const unitPrice = item.unitPriceCents
-                  const linePrice = item.linePriceCents || unitPrice * item.quantity
-
-                  return (
-                    <div
-                      key={item.key}
-                      className="flex items-start justify-between gap-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 px-3 py-3"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-14 h-14 rounded-2xl bg-slate-800/70 border border-slate-700/70 overflow-hidden flex items-center justify-center text-[10px] text-slate-500">
-                          {item.image ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={item.image}
-                              alt={item.title}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            "NFR"
-                          )}
-                        </div>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-slate-50">
-                              {item.title}
-                            </span>
-                          </div>
-                          {item.variantTitle && (
-                            <span className="text-[11px] text-slate-400 mt-0.5">
-                              {item.variantTitle}
-                            </span>
-                          )}
-                          <div className="flex items-center gap-2 mt-2 text-[11px] text-slate-400">
-                            <span className="px-2 py-0.5 rounded-full bg-slate-900/70 border border-slate-700/70">
-                              {item.quantity}×
-                            </span>
-                            <span>{formatMoney(unitPrice, currency)}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right text-xs text-slate-50">
-                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500 mb-0.5">
-                          Totale riga
-                        </div>
-                        <div className="font-semibold">
-                          {formatMoney(linePrice, currency)}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Subtotale + spedizione */}
-            <div className="mt-4 border-t border-slate-800 pt-4 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Subtotale prodotti</span>
-                <span className="text-slate-100 font-medium">
-                  {formatMoney(subtotalCents, currency)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">
-                  Spedizione{" "}
-                  {shippingLoading && (
-                    <span className="text-[11px] text-slate-500">
-                      (calcolo…)
-                    </span>
-                  )}
-                </span>
-                <span className="text-slate-100 font-medium">
-                  {shippingCents > 0
-                    ? formatMoney(shippingCents, currency)
-                    : "Calcolata dopo"}
-                </span>
-              </div>
-
-              {shippingError && (
-                <p className="text-[11px] text-amber-400 mt-1">
-                  {shippingError}
-                </p>
-              )}
-
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800 mt-2">
-                <span className="text-slate-200 font-medium">
-                  Totale ordine
-                </span>
-                <span className="text-slate-50 font-semibold text-base">
-                  {formatMoney(totalCents, currency)}
-                </span>
-              </div>
-            </div>
-          </section>
-
-          {/* Colonna destra: widget pagamento inline Stripe */}
-          <section className="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 md:p-6 backdrop-blur-xl shadow-[0_24px_60px_rgba(15,23,42,0.95)] flex flex-col justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-slate-800/80 border border-slate-700/80 flex items-center justify-center text-[10px] text-slate-300">
-                  💳
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                    Pagamento sicuro
-                  </span>
-                  <span className="text-sm font-medium text-slate-50">
-                    Gestito da Stripe
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-slate-400 mb-4">
-                I dati della tua carta non transitano mai sui server di Not For
-                Resale. Il pagamento è gestito interamente da Stripe, conforme
-                agli standard PCI-DSS.
+        <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 lg:flex-row lg:py-10">
+          {/* Colonna sinistra – dati spedizione */}
+          <section className="flex-1 space-y-5">
+            <div className="rounded-3xl border border-slate-800/80 bg-gradient-to-br from-slate-950 via-slate-950/90 to-slate-900/80 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.9)]">
+              <h1 className="text-lg font-semibold text-slate-50 sm:text-xl">
+                Completa i dati e paga in modo sicuro.
+              </h1>
+              <p className="mt-1 text-xs text-slate-400 sm:text-[13px]">
+                Inserisci i dati di spedizione. Il pagamento viene elaborato da Stripe:
+                i dati della carta non passano mai sui nostri server.
               </p>
 
-              <div className="mb-3 flex items-center justify-between text-xs text-slate-400">
-                <span>Totale ordine</span>
-                <span className="text-sm font-semibold text-slate-50">
-                  {formatMoney(totalCents, currency)}
-                </span>
+              <div className="mt-5 space-y-4">
+                {/* Email */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300">
+                    Email per conferma ordine
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="nome@email.com"
+                    className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-400/70 focus:bg-slate-900/80"
+                  />
+                </div>
+
+                {/* Nome / Cognome */}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">
+                      Nome
+                    </label>
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={e => setFirstName(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">
+                      Cognome
+                    </label>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={e => setLastName(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                    />
+                  </div>
+                </div>
+
+                {/* Indirizzo */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300">
+                    Indirizzo
+                  </label>
+                  <input
+                    type="text"
+                    value={address1}
+                    onChange={e => setAddress1(e.target.value)}
+                    placeholder="Via, numero civico"
+                    className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                  />
+                </div>
+
+                {/* Città / CAP */}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">
+                      Città
+                    </label>
+                    <input
+                      type="text"
+                      value={city}
+                      onChange={e => setCity(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-300">
+                      CAP
+                    </label>
+                    <input
+                      type="text"
+                      value={zip}
+                      onChange={e => setZip(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                    />
+                  </div>
+                </div>
+
+                {/* Paese */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300">
+                    Paese / Regione
+                  </label>
+                  <select
+                    value={country}
+                    onChange={e => setCountry(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-800/80 bg-slate-900/60 px-3.5 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-400/70"
+                  >
+                    <option value="IT">Italia</option>
+                    <option value="FR">Francia</option>
+                    <option value="DE">Germania</option>
+                    <option value="ES">Spagna</option>
+                    <option value="EU">Altro paese UE</option>
+                  </select>
+                </div>
               </div>
-
-              {/* ✅ Componente Summary: bottone "Paga ora" con Stripe inline */}
-              <Summary
-                amountCents={totalCents}
-                currency={currency}
-                sessionId={data.sessionId}
-              />
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-800 flex flex-col gap-1">
-              <span className="text-[10px] text-slate-500">
-                Pagamento elaborato da Stripe. I dati della tua carta non
-                passano mai sui server di Not For Resale.
-              </span>
-              <span className="text-[10px] text-slate-500">
-                In caso di problemi con il pagamento, il tuo ordine non verrà
-                confermato e l&apos;importo non verrà addebitato.
-              </span>
             </div>
           </section>
-        </div>
+
+          {/* Colonna destra – riepilogo e pagamento */}
+          <aside className="w-full lg:w-[360px]">
+            <div className="sticky top-4 space-y-4">
+              {/* Box articoli */}
+              <div className="overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/80 p-4 shadow-[0_20px_80px_rgba(15,23,42,0.9)] backdrop-blur-2xl">
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-100">
+                    Articoli nel carrello
+                  </h2>
+                  <span className="rounded-full bg-slate-900/80 px-2 py-0.5 text-[11px] text-slate-400">
+                    {data?.items?.length || 0} articolo
+                    {data && data.items && data.items.length !== 1 ? "i" : ""}
+                  </span>
+                </div>
+
+                {loading && (
+                  <p className="text-xs text-slate-400">Caricamento carrello…</p>
+                )}
+
+                {error && (
+                  <p className="text-xs text-amber-400">
+                    {error}
+                  </p>
+                )}
+
+                {!loading && !error && data && data.items && data.items.length > 0 && (
+                  <div className="space-y-3">
+                    {data.items.map((item, idx) => {
+                      const linePriceCents =
+                        typeof item.line_price === "number" && item.line_price > 0
+                          ? item.line_price
+                          : item.price * item.quantity
+
+                      const linePrice = linePriceCents / 100
+                      const unitPrice = item.price / 100
+
+                      return (
+                        <div
+                          key={`${item.id}-${idx}`}
+                          className="flex gap-3 rounded-2xl bg-slate-900/60 p-2.5"
+                        >
+                          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 ring-1 ring-slate-800/80">
+                            {item.image ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.image}
+                                alt={item.title}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="px-1 text-center text-[10px] text-slate-500">
+                                Nessuna immagine
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-1 flex-col gap-0.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <p className="text-xs font-medium text-slate-100">
+                                  {item.title}
+                                </p>
+                                {item.variant_title && (
+                                  <p className="text-[11px] text-slate-400">
+                                    {item.variant_title}
+                                  </p>
+                                )}
+                                <p className="mt-0.5 text-[11px] text-slate-500">
+                                  {item.quantity}× {unitPrice.toFixed(2)} {currency}
+                                </p>
+                              </div>
+                              <div className="text-right text-xs font-semibold text-slate-100">
+                                {linePrice.toFixed(2)} {currency}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Totali + Summary (Stripe) */}
+              <div className="space-y-3 rounded-3xl border border-slate-800/80 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-900/85 p-4 shadow-[0_28px_90px_rgba(15,23,42,0.95)]">
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between text-[13px] text-slate-300">
+                    <span>Subtotale prodotti</span>
+                    <span className="font-medium">
+                      {subtotal.toFixed(2)} {currency}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[12px] text-slate-400">
+                    <span>Spedizione</span>
+                    <span>Calcolata dopo</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between border-t border-slate-800/80 pt-2">
+                    <span className="text-[13px] font-semibold text-slate-100">
+                      Totale ordine
+                    </span>
+                    <span className="text-base font-semibold text-slate-50">
+                      {total.toFixed(2)} {currency}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400 ring-1 ring-slate-800/80">
+                  Pagamento gestito da Stripe. I dati della tua carta non passano mai
+                  sui nostri server.
+                </div>
+
+                {sessionId && data && (
+                  <Summary sessionId={sessionId} />
+                )}
+
+                {!sessionId && (
+                  <p className="text-[11px] text-amber-400">
+                    Nessun carrello valido. Torna al sito e riprova ad aprire il
+                    checkout.
+                  </p>
+                )}
+              </div>
+            </div>
+          </aside>
+        </main>
       </div>
-    </main>
+    </CheckoutLayout>
   )
 }
