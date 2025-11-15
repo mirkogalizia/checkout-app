@@ -1,17 +1,24 @@
 "use client"
 
-import React, { useEffect, useState, Suspense } from "react"
+import {
+  useEffect,
+  useState,
+  Suspense,
+} from "react"
 import { useSearchParams } from "next/navigation"
-import { loadStripe } from "@stripe/stripe-js"
+import {
+  loadStripe,
+} from "@stripe/stripe-js"
 import {
   Elements,
   PaymentElement,
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js"
-import type { StripeElementsOptions } from "@stripe/stripe-js"
 
-// Stripe publishable key (LIVE o TEST, presa da Vercel)
+// ---------------------------------------------
+// Stripe publishable key (pk_live / pk_test)
+// ---------------------------------------------
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
 )
@@ -28,48 +35,64 @@ type CheckoutItem = {
 
 type Customer = {
   email: string
-  firstName: string
-  lastName: string
+  fullName: string
   address1: string
-  address2: string
+  address2?: string
   city: string
   province: string
   zip: string
   country: string
-  phone: string
 }
 
+// ---------------------------------------------
+// WRAPPER CON SUSPENSE
+// ---------------------------------------------
 function CheckoutPageInner() {
   const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId") || ""
+  const sessionId = searchParams.get("sessionId")
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [items, setItems] = useState<CheckoutItem[]>([])
   const [currency, setCurrency] = useState("EUR")
-  const [subtotal, setSubtotal] = useState(0) // in € (non centesimi)
-  const [shipping, setShipping] = useState(0) // in €
-  const [total, setTotal] = useState(0) // in €
+
+  const [subtotal, setSubtotal] = useState(0)
+  const [shippingAmount, setShippingAmount] = useState(0)
+  const [total, setTotal] = useState(0)
 
   const [clientSecret, setClientSecret] = useState<string | null>(null)
 
+  // dati cliente (spedizione)
   const [customer, setCustomer] = useState<Customer>({
     email: "",
-    firstName: "",
-    lastName: "",
+    fullName: "",
     address1: "",
     address2: "",
     city: "",
     province: "",
     zip: "",
     country: "IT",
-    phone: "",
   })
 
-  // Carica il carrello da Firestore
+  // ---------------------------------------------
+  // Cambio campi cliente
+  // ---------------------------------------------
+  function handleCustomerChange(
+    field: keyof Customer,
+    value: string,
+  ) {
+    setCustomer(prev => ({
+      ...prev,
+      [field]: value,
+    }))
+  }
+
+  // ---------------------------------------------
+  // Carica carrello + clientSecret in UNA chiamata
+  // ---------------------------------------------
   useEffect(() => {
-    async function loadCart() {
+    async function load() {
       if (!sessionId) {
         setError("Nessuna sessione di checkout trovata.")
         setLoading(false)
@@ -91,31 +114,26 @@ function CheckoutPageInner() {
           return
         }
 
-        const itemsArr: CheckoutItem[] = data.items || []
-
-        const currency =
-          (data.currency || data.totals?.currency || "EUR").toString().toUpperCase()
-
-        const subtotalCents =
-          typeof data.subtotalCents === "number"
-            ? data.subtotalCents
-            : typeof data.totals?.subtotal === "number"
-            ? data.totals.subtotal
-            : 0
-
-        const shippingCents =
-          typeof data.shippingCents === "number" ? data.shippingCents : 0
-
+        const items: CheckoutItem[] = data.items || []
+        const currency = data.currency || "EUR"
+        const subtotalCents = Number(data.subtotalCents || 0)
+        const shippingCents = Number(data.shippingCents || 0)
         const totalCents =
-          typeof data.totalCents === "number"
-            ? data.totalCents
+          data.totalCents != null
+            ? Number(data.totalCents)
             : subtotalCents + shippingCents
 
-        setItems(itemsArr)
+        setItems(items)
         setCurrency(currency)
         setSubtotal(subtotalCents / 100)
-        setShipping(shippingCents / 100)
+        setShippingAmount(shippingCents / 100)
         setTotal(totalCents / 100)
+
+        setClientSecret(
+          typeof data.paymentIntentClientSecret === "string"
+            ? data.paymentIntentClientSecret
+            : null,
+        )
       } catch (err) {
         console.error(err)
         setError("Errore nel caricamento del carrello")
@@ -124,84 +142,41 @@ function CheckoutPageInner() {
       }
     }
 
-    loadCart()
+    load()
   }, [sessionId])
 
-  // Richiede il PaymentIntent a Stripe (via API route)
-  useEffect(() => {
-    async function createPaymentIntent() {
-      if (!sessionId) return
-
-      try {
-        const res = await fetch("/api/payment-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
-        })
-        const data = await res.json()
-
-        if (!res.ok) {
-          console.error("Errore payment-intent:", data.error)
-          return
-        }
-
-        if (data.clientSecret) {
-          setClientSecret(data.clientSecret)
-        }
-      } catch (err) {
-        console.error("Errore creazione payment-intent:", err)
-      }
-    }
-
-    createPaymentIntent()
-  }, [sessionId])
-
-  // Quando viene inserito un CAP, setta spedizione fissa 5,90€
-  useEffect(() => {
-    if (customer.zip && shipping === 0 && subtotal > 0) {
-      const shippingAmount = 5.9
-      setShipping(shippingAmount)
-      setTotal(subtotal + shippingAmount)
-    }
-  }, [customer.zip, subtotal, shipping])
-
-  function handleCustomerChange<K extends keyof Customer>(
-    field: K,
-    value: Customer[K],
-  ) {
-    setCustomer(prev => ({
-      ...prev,
-      [field]: value,
-    }))
+  // ---------------------------------------------
+  // Calcolo spedizione fissa 5,90€ (se vuoi API -> /api/shipping)
+  // ---------------------------------------------
+  async function handleCalcShipping() {
+    // qui puoi attaccarti alla tua /api/shipping
+    const shipping = 5.9
+    setShippingAmount(shipping)
+    setTotal(subtotal + shipping)
   }
-
-  const itemsCount = items.reduce(
-    (acc, it) => acc + Number(it.quantity || 0),
-    0,
-  )
-
-  const fmt = (v: number) => `${v.toFixed(2)} ${currency}`
 
   if (loading) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-white text-gray-900">
-        <div className="text-sm text-gray-500">Caricamento checkout…</div>
+        Caricamento checkout…
       </main>
     )
   }
 
   if (error || !sessionId) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-white text-gray-900 px-4">
-        <div className="max-w-md w-full border border-gray-200 rounded-lg p-6 text-center">
-          <h1 className="text-lg font-semibold mb-2">Errore checkout</h1>
-          <p className="text-sm text-gray-600 mb-4">
+      <main className="min-h-screen flex items-center justify-center bg-white text-gray-900">
+        <div className="border border-red-200 bg-red-50 rounded-2xl px-6 py-4 max-w-md text-center">
+          <h1 className="text-lg font-semibold mb-2">
+            Errore checkout
+          </h1>
+          <p className="text-sm opacity-90 mb-4">
             {error ||
-              "Non è stato possibile recuperare il carrello per questo link."}
+              "Si è verificato un problema nel recupero del carrello."}
           </p>
           <a
             href="/"
-            className="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+            className="inline-flex items-center justify-center px-4 py-2 rounded-full bg-black text-white text-sm font-medium"
           >
             Torna allo shop
           </a>
@@ -210,180 +185,227 @@ function CheckoutPageInner() {
     )
   }
 
-  const totalFormatted = fmt(total || subtotal + shipping)
+  const itemsCount = items.reduce(
+    (acc, it) => acc + Number(it.quantity || 0),
+    0,
+  )
+
+  const totalFormatted = `${total.toFixed(2)} ${currency}`
 
   return (
-    <main className="min-h-screen bg-white text-gray-900">
-      {/* Header tipo Shopify */}
-      <header className="border-b border-gray-200">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full border border-gray-900 flex items-center justify-center text-xs font-semibold">
-              NF
-            </div>
-            <span className="text-sm font-medium tracking-wide uppercase">
-              NOT FOR RESALE
-            </span>
-          </div>
-          <div className="hidden text-xs text-gray-500 sm:block">
-            Checkout sicuro
-          </div>
-        </div>
-      </header>
+    <main className="min-h-screen bg-[#f5f5f5] text-gray-900 flex items-start justify-center px-4 py-10">
+      <div className="w-full max-w-5xl grid gap-8 md:grid-cols-[minmax(0,2.1fr)_minmax(0,1.4fr)]">
 
-      {/* Body a due colonne */}
-      <div className="mx-auto flex max-w-5xl flex-col-reverse gap-10 px-4 py-8 lg:flex-row lg:items-start">
-        {/* Colonna sinistra: dati cliente / indirizzo */}
-        <section className="flex-1 space-y-8">
-          {/* Contatto */}
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">
-              Contatto
+        {/* COLONNA SINISTRA – dati cliente */}
+        <section className="bg-white border border-gray-200 rounded-3xl p-6 md:p-8 shadow-sm">
+          <header className="mb-6">
+            <h1 className="text-2xl font-semibold">
+              Checkout
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Completa i dati e paga in modo sicuro.
+            </p>
+          </header>
+
+          {/* CONTATTI */}
+          <div className="mb-8 space-y-3">
+            <h2 className="text-sm font-semibold uppercase text-gray-800">
+              Contatti
             </h2>
-            <div className="space-y-3">
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Email
+              </label>
               <input
                 type="email"
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                placeholder="Email"
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
                 value={customer.email}
-                onChange={e => handleCustomerChange("email", e.target.value)}
+                onChange={e =>
+                  handleCustomerChange("email", e.target.value)
+                }
+                placeholder="tuoindirizzo@email.com"
               />
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="newsletter"
-                  className="h-4 w-4 rounded border-gray-300 text-black focus:ring-black"
-                />
-                <label
-                  htmlFor="newsletter"
-                  className="text-xs text-gray-600"
-                >
-                  Voglio ricevere offerte esclusive via email
-                </label>
-              </div>
             </div>
           </div>
 
-          {/* Spedizione */}
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">
-              Spedizione
+          {/* CONSEGNA */}
+          <div className="mb-8 space-y-4">
+            <h2 className="text-sm font-semibold uppercase text-gray-800">
+              Consegna
             </h2>
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Nome completo
+              </label>
+              <input
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+                value={customer.fullName}
+                onChange={e =>
+                  handleCustomerChange("fullName", e.target.value)
+                }
+                placeholder="Es. Mario Rossi"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Indirizzo
+              </label>
+              <input
+                className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+                value={customer.address1}
+                onChange={e =>
+                  handleCustomerChange("address1", e.target.value)
+                }
+                placeholder="Via, numero civico"
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  CAP
+                </label>
                 <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="Nome"
-                  value={customer.firstName}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
+                  value={customer.zip}
                   onChange={e =>
-                    handleCustomerChange("firstName", e.target.value)
-                  }
-                />
-                <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="Cognome"
-                  value={customer.lastName}
-                  onChange={e =>
-                    handleCustomerChange("lastName", e.target.value)
+                    handleCustomerChange("zip", e.target.value)
                   }
                 />
               </div>
-
-              <input
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                placeholder="Indirizzo"
-                value={customer.address1}
-                onChange={e => handleCustomerChange("address1", e.target.value)}
-              />
-
-              <input
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                placeholder="Appartamento, scala, interno (opzionale)"
-                value={customer.address2}
-                onChange={e => handleCustomerChange("address2", e.target.value)}
-              />
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Città
+                </label>
                 <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="CAP"
-                  value={customer.zip}
-                  onChange={e => handleCustomerChange("zip", e.target.value)}
-                />
-                <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="Città"
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
                   value={customer.city}
-                  onChange={e => handleCustomerChange("city", e.target.value)}
+                  onChange={e =>
+                    handleCustomerChange("city", e.target.value)
+                  }
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Provincia
+                </label>
                 <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="Provincia"
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
                   value={customer.province}
                   onChange={e =>
                     handleCustomerChange("province", e.target.value)
                   }
                 />
               </div>
+            </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <select
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-end">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Paese / Regione
+                </label>
+                <input
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-black"
                   value={customer.country}
                   onChange={e =>
                     handleCustomerChange("country", e.target.value)
                   }
-                >
-                  <option value="IT">Italia</option>
-                  <option value="SM">San Marino</option>
-                  <option value="VA">Città del Vaticano</option>
-                </select>
-                <input
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
-                  placeholder="Telefono (per il corriere)"
-                  value={customer.phone}
-                  onChange={e => handleCustomerChange("phone", e.target.value)}
                 />
+              </div>
+              <button
+                type="button"
+                onClick={handleCalcShipping}
+                className="inline-flex items-center justify-center rounded-xl bg-black text-white text-sm font-medium px-4 py-2.5 hover:bg-gray-900 transition"
+              >
+                Calcola spedizione
+              </button>
+            </div>
+          </div>
+
+          {/* ARTICOLI */}
+          <div className="space-y-4">
+            <h2 className="text-sm font-semibold uppercase text-gray-800">
+              Articoli nel carrello ({itemsCount})
+            </h2>
+
+            {items.map((item, idx) => {
+              const linePrice = Number(item.linePriceCents || 0) / 100
+              const unitPrice = Number(item.priceCents || 0) / 100
+
+              return (
+                <div
+                  key={idx}
+                  className="flex justify-between items-start p-3 bg-gray-50 border border-gray-200 rounded-2xl"
+                >
+                  <div>
+                    <div className="text-sm font-medium">
+                      {item.title}
+                    </div>
+                    {item.variantTitle && (
+                      <div className="text-xs text-gray-500">
+                        {item.variantTitle}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 mt-1">
+                      {item.quantity}×{" "}
+                      {unitPrice.toFixed(2)} {currency}
+                    </div>
+                  </div>
+
+                  <div className="text-sm font-semibold">
+                    {linePrice.toFixed(2)} {currency}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        {/* COLONNA DESTRA – riepilogo + pagamento */}
+        <section className="bg-white border border-gray-200 rounded-3xl p-6 md:p-8 shadow-sm flex flex-col gap-6">
+          <div>
+            <h2 className="text-sm font-semibold uppercase text-gray-800 mb-4">
+              Totale ordine
+            </h2>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Subtotale</span>
+                <span>
+                  {subtotal.toFixed(2)} {currency}
+                </span>
+              </div>
+
+              <div className="flex justify-between">
+                <span className="text-gray-600">Spedizione</span>
+                <span>
+                  {shippingAmount > 0
+                    ? `${shippingAmount.toFixed(2)} ${currency}`
+                    : "Calcolata dopo"}
+                </span>
+              </div>
+
+              <div className="border-t border-gray-200 pt-3 flex justify-between text-base">
+                <span className="font-semibold text-gray-900">
+                  Totale
+                </span>
+                <span className="font-semibold text-lg">
+                  {totalFormatted}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Metodo di spedizione (mock 5,90€) */}
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-gray-900">
-              Metodo di spedizione
-            </h2>
-            <div className="rounded-md border border-gray-300 bg-white">
-              <label className="flex items-center justify-between gap-3 px-3 py-3 text-sm">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="shipping"
-                    defaultChecked
-                    className="h-4 w-4 border-gray-300 text-black focus:ring-black"
-                  />
-                  <div className="flex flex-col">
-                    <span>Spedizione Express</span>
-                    <span className="text-xs text-gray-500">
-                      24/48h lavorative
-                    </span>
-                  </div>
-                </div>
-                <span className="text-sm font-medium">
-                  {shipping > 0 ? fmt(shipping) : "5,90 EUR"}
-                </span>
-              </label>
-            </div>
-          </div>
-
-          {/* Pagamento: box con Stripe Payment Element */}
-          <div className="space-y-3 pt-4 border-t border-gray-200">
-            <h2 className="text-base font-semibold text-gray-900">
-              Pagamento
-            </h2>
-            <p className="text-xs text-gray-500">
-              Tutte le transazioni sono sicure e crittografate.
-            </p>
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold flex items-center justify-between">
+              <span>Pagamento con carta</span>
+              <span className="text-xs text-gray-500">
+                Tutte le transazioni sono sicure.
+              </span>
+            </h3>
 
             <PaymentBox
               clientSecret={clientSecret}
@@ -393,104 +415,14 @@ function CheckoutPageInner() {
             />
           </div>
         </section>
-
-        {/* Colonna destra: riepilogo ordine */}
-        <aside className="w-full max-w-md space-y-6 lg:sticky lg:top-0">
-          <div className="space-y-4 border border-gray-200 bg-gray-50 p-4 rounded-lg">
-            {/* Lista articoli */}
-            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-              {items.map(item => {
-                const linePrice = Number(item.linePriceCents || 0) / 100
-                const unitPrice = Number(item.priceCents || 0) / 100
-
-                return (
-                  <div
-                    key={item.id}
-                    className="flex gap-3 border-b border-gray-200 pb-3 last:border-b-0 last:pb-0"
-                  >
-                    <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border border-gray-200 bg-white">
-                      {item.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={item.image}
-                          alt={item.title}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-400">
-                          Nessuna immagine
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex flex-1 flex-col">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {item.title}
-                          </div>
-                          {item.variantTitle && (
-                            <div className="text-xs text-gray-500">
-                              {item.variantTitle}
-                            </div>
-                          )}
-                          <div className="mt-1 text-xs text-gray-500">
-                            Qty: {item.quantity}
-                          </div>
-                        </div>
-                        <div className="text-sm font-medium text-gray-900 text-right">
-                          {linePrice > 0 ? (
-                            <>
-                              <div>{fmt(linePrice)}</div>
-                              {unitPrice !== linePrice &&
-                                item.quantity > 1 && (
-                                  <div className="text-[11px] text-gray-500">
-                                    ({fmt(unitPrice)} cad.)
-                                  </div>
-                                )}
-                            </>
-                          ) : (
-                            <div>{fmt(unitPrice * item.quantity)}</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Totali */}
-            <div className="space-y-2 border-t border-gray-200 pt-4 text-sm">
-              <div className="flex items-center justify-between text-gray-700">
-                <span>Subtotale</span>
-                <span>{fmt(subtotal)}</span>
-              </div>
-              <div className="flex items-center justify-between text-gray-700">
-                <span>Spedizione</span>
-                <span>
-                  {shipping > 0 ? fmt(shipping) : "Calcolata dopo indirizzo"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between pt-2 text-base font-semibold text-gray-900">
-                <span>Totale</span>
-                <span>{totalFormatted}</span>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-gray-500">
-              Tassa inclusa dove applicabile. Il numero degli articoli è{" "}
-              {itemsCount}.
-            </p>
-          </div>
-        </aside>
       </div>
     </main>
   )
 }
 
-/* -----------------------------
-   PAGAMENTO STRIPE — BOX
------------------------------- */
+/* ---------------------------------------------
+   BOX PAGAMENTO STRIPE
+---------------------------------------------- */
 
 function PaymentBox({
   clientSecret,
@@ -511,7 +443,6 @@ function PaymentBox({
     )
   }
 
-  // 👇 usiamo `any` per evitare l'errore TS sulla proprietà `fields`
   const options: any = {
     clientSecret,
     appearance: {
@@ -522,30 +453,7 @@ function PaymentBox({
         colorBackground: "#ffffff",
         colorText: "#111111",
         colorDanger: "#df1c41",
-        borderRadius: "10px",
-        colorBorder: "#111111",
-      },
-      rules: {
-        ".Input": {
-          borderColor: "#111111",
-          boxShadow: "0 0 0 1px #111111",
-          padding: "10px 12px",
-        },
-        ".Tab": {
-          borderRadius: "9999px",
-        },
-        ".Label": {
-          fontSize: "12px",
-          fontWeight: "500",
-        },
-      },
-    },
-    // 👉 chiedi a Stripe di mostrare "Nome sulla carta" **dentro** il Payment Element
-    fields: {
-      billingDetails: {
-        name: "always",
-        email: "never",
-        address: "never",
+        borderRadius: "8px",
       },
     },
   }
@@ -573,6 +481,7 @@ function PaymentBoxInner({
   const stripe = useStripe()
   const elements = useElements()
 
+  const [cardholderName, setCardholderName] = useState("")
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -582,58 +491,90 @@ function PaymentBoxInner({
     setPaying(true)
     setError(null)
 
-    // Il Payment Element gestisce numero carta + scadenza + CVC + nome sulla carta
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      redirect: "if_required",
-    } as any)
+    const fullName =
+      cardholderName.trim() || customer.fullName.trim() || ""
 
-    if (error) {
-      console.error(error)
-      setError(error.message || "Errore durante il pagamento")
-      setPaying(false)
-      return
-    }
+    try {
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          payment_method_data: {
+            billing_details: {
+              name: fullName || undefined,
+              email: customer.email || undefined,
+              address: {
+                line1: customer.address1 || undefined,
+                line2: customer.address2 || undefined,
+                postal_code: customer.zip || undefined,
+                city: customer.city || undefined,
+                state: customer.province || undefined,
+                country: customer.country || undefined,
+              },
+            },
+          },
+          // se vuoi redirect di successo lato Stripe:
+          // return_url: `${window.location.origin}/thank-you?sessionId=${encodeURIComponent(sessionId)}`,
+        },
+        redirect: "if_required",
+      } as any)
 
-    if (paymentIntent && paymentIntent.status === "succeeded") {
-      try {
-        await fetch("/api/shopify/create-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            paymentIntentId: paymentIntent.id,
-            customer,
-          }),
-        })
-      } catch (e) {
-        console.error("Errore creazione ordine Shopify", e)
+      if (error) {
+        console.error(error)
+        setError(error.message || "Errore durante il pagamento")
+        setPaying(false)
+        return
       }
 
-      window.location.href = `/thank-you?sessionId=${encodeURIComponent(
-        sessionId,
-      )}&pi=${encodeURIComponent(paymentIntent.id)}`
-    } else {
-      setError("Pagamento non completato. Riprova.")
+      if (paymentIntent && paymentIntent.status === "succeeded") {
+        try {
+          // puoi creare ordine Shopify qui (API tua privata)
+          await fetch("/api/shopify/create-order", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              paymentIntentId: paymentIntent.id,
+              customer,
+            }),
+          })
+        } catch (e) {
+          console.error("Errore creazione ordine Shopify", e)
+        }
+
+        window.location.href = `/thank-you?sessionId=${encodeURIComponent(
+          sessionId,
+        )}&pi=${encodeURIComponent(paymentIntent.id)}`
+      } else {
+        setError("Pagamento non completato. Riprova.")
+        setPaying(false)
+      }
+    } catch (err: any) {
+      console.error(err)
+      setError(
+        err?.message || "Errore imprevisto durante il pagamento",
+      )
       setPaying(false)
     }
   }
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-gray-300 bg-white p-4 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900">
-            Pagamento con carta
-          </h3>
-          <span className="text-xs text-gray-500">
-            Tutte le transazioni sono sicure.
-          </span>
-        </div>
+      {/* Nome sull'intestatario sopra al box carta */}
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1.5">
+          Nome completo sull&apos;intestatario della carta
+        </label>
+        <input
+          type="text"
+          value={cardholderName}
+          onChange={e => setCardholderName(e.target.value)}
+          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-black focus:ring-2 focus:ring-black"
+          placeholder="Es. Mario Rossi"
+        />
+      </div>
 
-        <div className="rounded-lg border-2 border-black/90 bg-white px-3 py-3">
-          <PaymentElement />
-        </div>
+      <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
+        <PaymentElement />
       </div>
 
       {error && (
@@ -643,26 +584,21 @@ function PaymentBoxInner({
       )}
 
       <button
-        type="button"
         onClick={handlePay}
         disabled={paying || !stripe || !elements}
-        className="w-full inline-flex items-center justify-center rounded-md bg-black px-4 py-3 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-60"
+        className="w-full inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-gray-900 disabled:opacity-60"
       >
         {paying ? "Elaborazione…" : `Paga ora ${totalFormatted}`}
       </button>
-
       <p className="text-[11px] text-gray-500">
-        I pagamenti sono elaborati in modo sicuro da Stripe. I dati della
-        carta non passano mai sui nostri server.
+        I pagamenti sono elaborati in modo sicuro da Stripe. I dati
+        della carta non passano mai sui nostri server.
       </p>
     </div>
   )
 }
 
-/* -----------------------------
-   EXPORT PAGINA
------------------------------- */
-
+// wrapper con Suspense (Next 13+)
 export default function CheckoutPage() {
   return (
     <Suspense fallback={<div>Caricamento checkout…</div>}>

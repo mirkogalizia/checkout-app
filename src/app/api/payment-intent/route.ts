@@ -8,8 +8,8 @@ const COLLECTION = "cartSessions"
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const sessionId = body.sessionId as string | undefined
+    const body = await req.json().catch(() => null)
+    const sessionId = body?.sessionId as string | undefined
 
     if (!sessionId) {
       return NextResponse.json(
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 1) Recupero dati carrello da Firestore
+    // 1) Recupera la sessione carrello da Firestore
     const snap = await db.collection(COLLECTION).doc(sessionId).get()
 
     if (!snap.exists) {
@@ -30,12 +30,22 @@ export async function POST(req: NextRequest) {
 
     const data = snap.data() || {}
 
+    // Se abbiamo già un PaymentIntent salvato, riusa quello
+    if (data.paymentIntentClientSecret) {
+      return NextResponse.json(
+        { clientSecret: data.paymentIntentClientSecret },
+        { status: 200 },
+      )
+    }
+
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
     const subtotalCents =
       typeof data.subtotalCents === "number"
         ? data.subtotalCents
-        : (data.totals?.subtotal ?? 0)
+        : typeof data.totals?.subtotal === "number"
+        ? data.totals.subtotal
+        : 0
 
     const shippingCents =
       typeof data.shippingCents === "number" ? data.shippingCents : 0
@@ -47,13 +57,17 @@ export async function POST(req: NextRequest) {
 
     if (!totalCents || totalCents < 50) {
       return NextResponse.json(
-        { error: "Importo non valido." },
+        {
+          error:
+            "Importo non valido. Verifica il totale ordine prima di procedere al pagamento.",
+        },
         { status: 400 },
       )
     }
 
-    // 2) Prendo la secret key Stripe da Firebase (onboarding)
+    // 2) Prende la secret di Stripe da Firebase config (onboarding)
     const cfg = await getConfig()
+
     const firstStripe =
       (cfg.stripeAccounts || []).find((a: any) => a.secretKey) || null
 
@@ -61,7 +75,7 @@ export async function POST(req: NextRequest) {
       firstStripe?.secretKey || process.env.STRIPE_SECRET_KEY || ""
 
     if (!secretKey) {
-      console.error("[payment-intent] Nessuna Stripe secret key configurata")
+      console.error("[/api/payment-intent] Nessuna Stripe secret key configurata")
       return NextResponse.json(
         { error: "Configurazione Stripe mancante" },
         { status: 500 },
@@ -70,33 +84,32 @@ export async function POST(req: NextRequest) {
 
     const stripe = new Stripe(secretKey)
 
-    // 3) Creo PaymentIntent **SOLO CARTA**
-    //    (niente Bancontact, EPS, ecc → payment_method_types: ["card"])
-    const pi = await stripe.paymentIntents.create({
+    // 3) Crea un PaymentIntent se non esiste già
+    const paymentIntent = await stripe.paymentIntents.create({
       amount: totalCents,
       currency,
-      payment_method_types: ["card"],
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: {
+        sessionId,
+      },
     })
 
-    // 4) Salvo l'id del PaymentIntent sulla sessione checkout
-    await db
-      .collection(COLLECTION)
-      .doc(sessionId)
-      .set(
-        {
-          paymentIntentId: pi.id,
-        },
-        { merge: true },
-      )
+    // 4) Salva info del PaymentIntent dentro alla sessione carrello
+    await db.collection(COLLECTION).doc(sessionId).update({
+      paymentIntentId: paymentIntent.id,
+      paymentIntentClientSecret: paymentIntent.client_secret,
+    })
 
     return NextResponse.json(
-      { clientSecret: pi.client_secret },
+      { clientSecret: paymentIntent.client_secret },
       { status: 200 },
     )
-  } catch (err: any) {
-    console.error("[payment-intent] errore:", err)
+  } catch (error: any) {
+    console.error("[/api/payment-intent] errore:", error)
     return NextResponse.json(
-      { error: err.message || "Errore interno" },
+      { error: error.message || "Errore interno nella creazione del pagamento" },
       { status: 500 },
     )
   }

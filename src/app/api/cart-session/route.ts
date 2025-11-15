@@ -1,47 +1,38 @@
 // src/app/api/cart-session/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { randomUUID } from "crypto"
+import Stripe from "stripe"
 import { db } from "@/lib/firebaseAdmin"
+import { getConfig } from "@/lib/config"
+
+const COLLECTION = "cartSessions"
 
 type ShopifyCartItem = {
   id: number | string
   title: string
   quantity: number
-  price: number // centesimi (prezzo unitario "di listino")
-  line_price?: number // totale riga (spesso già scontato)
-  discounted_price?: number // prezzo unitario scontato
-  final_line_price?: number // totale riga finale (dopo sconto)
-  total_discount?: number // sconto totale di riga
+  price: number // centesimi
+  line_price?: number // centesimi
   image?: string
-  featured_image?: { url?: string }
   variant_title?: string
 }
 
 type ShopifyCart = {
   items?: ShopifyCartItem[]
-  items_subtotal_price?: number
-  original_total_price?: number
-  total_discount?: number
-  total_price?: number
+  items_subtotal_price?: number // centesimi
+  total_price?: number // centesimi
   currency?: string
-  discount_codes?: { code: string }[]
 }
 
 type CheckoutItem = {
   id: string | number
   title: string
-  variantTitle?: string
   quantity: number
-  // tutti in centesimi
-  priceCents: number // prezzo unitario effettivo (scontato)
-  linePriceCents: number // totale riga effettivo
-  originalPriceCents: number // prezzo unitario pieno
-  discountedPriceCents: number // prezzo unitario scontato
-  lineDiscountCents: number // sconto totale su quella riga
+  priceCents: number
+  linePriceCents: number
   image?: string
+  variantTitle?: string
 }
-
-const COLLECTION = "cartSessions"
 
 function corsHeaders(origin: string | null) {
   return {
@@ -51,6 +42,7 @@ function corsHeaders(origin: string | null) {
   }
 }
 
+// Preflight CORS per chiamata da Shopify
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get("origin")
   return new NextResponse(null, {
@@ -61,7 +53,11 @@ export async function OPTIONS(req: NextRequest) {
 
 /**
  * POST /api/cart-session
- * Body: { cart: <dati /cart.js> }
+ * Chiamato dal tema Shopify (main-cart.liquid)
+ * Body: { cart: <dati di /cart.js> }
+ * - Salva il carrello in Firestore
+ * - Crea il PaymentIntent Stripe
+ * - Restituisce dati normalizzati + clientSecret
  */
 export async function POST(req: NextRequest) {
   try {
@@ -82,84 +78,105 @@ export async function POST(req: NextRequest) {
     }
 
     const cart: ShopifyCart = body.cart
-    const currency = (cart.currency || "EUR").toString().toUpperCase()
 
+    // Normalizza items
     const items: CheckoutItem[] = Array.isArray(cart.items)
-      ? cart.items.map((item) => {
-          const qty = Number(item.quantity || 0)
-
-          const originalPriceCents =
-            typeof item.price === "number" ? item.price : 0
-
-          const discountedPriceCents =
-            typeof item.discounted_price === "number"
-              ? item.discounted_price
-              : originalPriceCents
-
+      ? cart.items.map(item => {
+          const quantity = Number(item.quantity ?? 0)
+          const priceCents = Number(item.price ?? 0)
           const linePriceCents =
-            typeof item.final_line_price === "number"
-              ? item.final_line_price
-              : typeof item.line_price === "number"
+            typeof item.line_price === "number"
               ? item.line_price
-              : discountedPriceCents * qty
-
-          const lineDiscountCents =
-            typeof item.total_discount === "number" ? item.total_discount : 0
-
-          const image =
-            item.image || item.featured_image?.url || undefined
+              : priceCents * quantity
 
           return {
             id: item.id,
             title: item.title,
-            variantTitle: item.variant_title || "",
-            quantity: qty,
-            priceCents: discountedPriceCents,
+            quantity,
+            priceCents,
             linePriceCents,
-            originalPriceCents,
-            discountedPriceCents,
-            lineDiscountCents,
-            image,
+            image: item.image,
+            variantTitle: item.variant_title,
           }
         })
       : []
 
-    // Subtotale: usiamo il totale già scontato di Shopify
-    const subtotalCents =
-      typeof cart.total_price === "number"
-        ? cart.total_price
-        : typeof cart.items_subtotal_price === "number"
+    // Subtotale in centesimi
+    const subtotalFromCart =
+      typeof cart.items_subtotal_price === "number"
         ? cart.items_subtotal_price
-        : items.reduce((sum, it) => sum + it.linePriceCents, 0)
+        : 0
 
-    const discountTotalCents =
-      typeof cart.total_discount === "number" ? cart.total_discount : 0
+    const subtotalFromItems = items.reduce((sum, item) => {
+      return sum + (item.linePriceCents || 0)
+    }, 0)
 
-    const couponCodes =
-      Array.isArray(cart.discount_codes) && cart.discount_codes.length > 0
-        ? cart.discount_codes.map((d) => d.code)
-        : []
+    const subtotalCents =
+      subtotalFromCart && subtotalFromCart > 0
+        ? subtotalFromCart
+        : subtotalFromItems
 
+    // Spedizione: per ora 0 (la aggiorni dopo)
+    const shippingCents = 0
+
+    const totalCents =
+      typeof cart.total_price === "number" && cart.total_price > 0
+        ? cart.total_price
+        : subtotalCents + shippingCents
+
+    const currency = (cart.currency || "EUR").toString().toUpperCase()
     const sessionId = randomUUID()
 
-    const doc = {
+    // Recupera Stripe secretKey da config Firebase
+    const cfg = await getConfig()
+    const firstStripe =
+      (cfg.stripeAccounts || []).find((a: any) => a.secretKey) || null
+    const secretKey =
+      firstStripe?.secretKey || process.env.STRIPE_SECRET_KEY || ""
+
+    if (!secretKey) {
+      console.error("[cart-session POST] Nessuna Stripe secret key configurata")
+      return new NextResponse(
+        JSON.stringify({ error: "Configurazione Stripe mancante" }),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders(origin),
+          },
+        },
+      )
+    }
+
+    const stripe = new Stripe(secretKey)
+
+    // Crea PaymentIntent subito (mentre l’utente è ancora su Shopify)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: totalCents,
+      currency: currency.toLowerCase(),
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: {
+        sessionId,
+      },
+    })
+
+    // Salva tutto in Firestore
+    const docData = {
       sessionId,
       createdAt: new Date().toISOString(),
       currency,
       items,
       subtotalCents,
-      shippingCents: 0,
-      totalCents: subtotalCents, // per ora niente spedizione
-      discountTotalCents,
-      couponCodes,
-      totals: {
-        subtotal: subtotalCents,
-        currency,
-      },
+      shippingCents,
+      totalCents,
+      paymentIntentId: paymentIntent.id,
+      paymentIntentClientSecret: paymentIntent.client_secret,
       rawCart: cart,
     }
 
-    await db.collection(COLLECTION).doc(sessionId).set(doc)
+    await db.collection(COLLECTION).doc(sessionId).set(docData)
 
     return new NextResponse(
       JSON.stringify({
@@ -167,10 +184,9 @@ export async function POST(req: NextRequest) {
         currency,
         items,
         subtotalCents,
-        shippingCents: 0,
-        totalCents: subtotalCents,
-        discountTotalCents,
-        couponCodes,
+        shippingCents,
+        totalCents,
+        paymentIntentClientSecret: paymentIntent.client_secret,
       }),
       {
         status: 200,
@@ -183,7 +199,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[cart-session POST] errore:", err)
     return new NextResponse(
-      JSON.stringify({ error: "Errore interno creazione sessione carrello" }),
+      JSON.stringify({
+        error: "Errore interno creazione sessione carrello",
+      }),
       {
         status: 500,
         headers: {
@@ -197,7 +215,7 @@ export async function POST(req: NextRequest) {
 
 /**
  * GET /api/cart-session?sessionId=...
- * Restituisce struttura normalizzata per il checkout.
+ * Usato dal checkout per recuperare carrello + clientSecret
  */
 export async function GET(req: NextRequest) {
   try {
@@ -233,67 +251,10 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const data: any = snap.data() || {}
+    const data = snap.data() || {}
 
-    const currency = (
-      data.currency ||
-      data.totals?.currency ||
-      "EUR"
-    )
-      .toString()
-      .toUpperCase()
-
-    const rawItems: any[] = Array.isArray(data.items) ? data.items : []
-
-    const items: CheckoutItem[] = rawItems.map((item) => {
-      const qty = Number(item.quantity || 0)
-
-      const originalPriceCents =
-        typeof item.originalPriceCents === "number"
-          ? item.originalPriceCents
-          : typeof item.price === "number"
-          ? item.price
-          : typeof item.priceCents === "number"
-          ? item.priceCents
-          : 0
-
-      const discountedPriceCents =
-        typeof item.discountedPriceCents === "number"
-          ? item.discountedPriceCents
-          : typeof item.priceCents === "number"
-          ? item.priceCents
-          : originalPriceCents
-
-      const linePriceCents =
-        typeof item.linePriceCents === "number"
-          ? item.linePriceCents
-          : typeof item.line_price === "number"
-          ? item.line_price
-          : discountedPriceCents * qty
-
-      const lineDiscountCents =
-        typeof item.lineDiscountCents === "number"
-          ? item.lineDiscountCents
-          : typeof item.total_discount === "number"
-          ? item.total_discount
-          : 0
-
-      const image =
-        item.image || item.featured_image?.url || undefined
-
-      return {
-        id: item.id,
-        title: item.title,
-        variantTitle: item.variantTitle || item.variant_title || "",
-        quantity: qty,
-        priceCents: discountedPriceCents,
-        linePriceCents,
-        originalPriceCents,
-        discountedPriceCents,
-        lineDiscountCents,
-        image,
-      }
-    })
+    const currency = (data.currency || "EUR").toString().toUpperCase()
+    const items = Array.isArray(data.items) ? data.items : []
 
     const subtotalCents =
       typeof data.subtotalCents === "number"
@@ -310,29 +271,15 @@ export async function GET(req: NextRequest) {
         ? data.totalCents
         : subtotalCents + shippingCents
 
-    const discountTotalCents =
-      typeof data.discountTotalCents === "number"
-        ? data.discountTotalCents
-        : typeof data.rawCart?.total_discount === "number"
-        ? data.rawCart.total_discount
-        : 0
-
-    const couponCodes: string[] = Array.isArray(data.couponCodes)
-      ? data.couponCodes
-      : Array.isArray(data.rawCart?.discount_codes)
-      ? data.rawCart.discount_codes.map((d: any) => d.code)
-      : []
-
     return new NextResponse(
       JSON.stringify({
-        sessionId: data.sessionId || sessionId,
+        sessionId,
         currency,
         items,
         subtotalCents,
         shippingCents,
         totalCents,
-        discountTotalCents,
-        couponCodes,
+        paymentIntentClientSecret: data.paymentIntentClientSecret || null,
       }),
       {
         status: 200,
@@ -345,7 +292,9 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("[cart-session GET] errore:", err)
     return new NextResponse(
-      JSON.stringify({ error: "Errore interno lettura sessione carrello" }),
+      JSON.stringify({
+        error: "Errore interno lettura sessione carrello",
+      }),
       {
         status: 500,
         headers: {
