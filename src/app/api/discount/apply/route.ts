@@ -6,7 +6,6 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null)
     const code = body?.code as string | undefined
-    const sessionId = body?.sessionId as string | undefined
 
     if (!code || !code.trim()) {
       return NextResponse.json(
@@ -15,118 +14,182 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 🔹 Preleva TUTTA la config da Firestore
+    const normalizedCode = code.trim()
+
+    // 1) Leggiamo la config da Firestore
     const cfg = await getConfig()
     const shopDomain = cfg.shopify?.shopDomain
     const adminToken = cfg.shopify?.adminToken
     const apiVersion = cfg.shopify?.apiVersion || "2024-10"
 
     if (!shopDomain || !adminToken) {
-      console.error(
-        "[/api/discount/apply] Config Shopify mancante in Firestore:",
-        cfg.shopify,
+      console.error("[/api/discount/apply] Config Shopify mancante:", {
+        shopDomain,
+        hasAdminToken: !!adminToken,
+      })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Configurazione Shopify mancante (shopDomain / adminToken).",
+        },
+        { status: 500 },
       )
+    }
+
+    // 2) Usiamo l'Admin GraphQL API per cercare il codice sconto
+    const graphqlUrl = `https://${shopDomain}/admin/api/${apiVersion}/graphql.json`
+
+    const query = `
+      query DiscountCodeLookup($code: String!) {
+        discountCodeNodes(first: 1, query: $code) {
+          edges {
+            node {
+              id
+              code
+              usageCount
+              createdAt
+              discountCode {
+                __typename
+                ... on DiscountCodeBasic {
+                  id
+                  title
+                  status
+                  usageLimit
+                  appliesOncePerCustomer
+                  customerSelection {
+                    __typename
+                  }
+                  customerGets {
+                    __typename
+                    value {
+                      __typename
+                      ... on DiscountAmount {
+                        amount {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      ... on DiscountPercentage {
+                        percentage
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `
+
+    const variables = {
+      code: normalizedCode,
+    }
+
+    const gqlRes = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": adminToken,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+
+    if (!gqlRes.ok) {
+      const txt = await gqlRes.text()
+      console.error(
+        "[/api/discount/apply] GraphQL HTTP error:",
+        gqlRes.status,
+        txt,
+      )
+      return NextResponse.json(
+        { ok: false, error: "Errore nel contatto con Shopify (GraphQL)." },
+        { status: 500 },
+      )
+    }
+
+    const gqlJson = await gqlRes.json()
+
+    if (gqlJson.errors) {
+      console.error("[/api/discount/apply] GraphQL errors:", gqlJson.errors)
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Errore nella lettura del codice sconto da Shopify.",
+        },
+        { status: 500 },
+      )
+    }
+
+    const edges = gqlJson?.data?.discountCodeNodes?.edges || []
+    if (!edges.length) {
+      return NextResponse.json(
+        { ok: false, error: "Codice sconto non valido o non trovato." },
+        { status: 404 },
+      )
+    }
+
+    const node = edges[0].node
+    const gqlCode = node?.code as string | undefined
+    const discountCodeObj = node?.discountCode
+
+    if (!gqlCode || !discountCodeObj) {
+      return NextResponse.json(
+        { ok: false, error: "Codice sconto non valido o non attivo." },
+        { status: 400 },
+      )
+    }
+
+    // Supportiamo solo DiscountCodeBasic per ora
+    if (discountCodeObj.__typename !== "DiscountCodeBasic") {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "Configurazione Shopify mancante sul server (shopDomain/adminToken).",
-        },
-        { status: 500 },
-      )
-    }
-
-    const normalizedCode = code.trim()
-
-    // 1) Lookup del codice sconto
-    const lookupUrl = `https://${shopDomain}/admin/api/${apiVersion}/discount_codes/lookup.json?code=${encodeURIComponent(
-      normalizedCode,
-    )}`
-
-    const lookupRes = await fetch(lookupUrl, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": adminToken,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    })
-
-    if (!lookupRes.ok) {
-      if (lookupRes.status === 404) {
-        return NextResponse.json(
-          { ok: false, error: "Codice sconto non valido o non attivo." },
-          { status: 404 },
-        )
-      }
-
-      const txt = await lookupRes.text()
-      console.error("[discount lookup] Errore:", lookupRes.status, txt)
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Errore nel contatto con Shopify (lookup codice).",
-        },
-        { status: 500 },
-      )
-    }
-
-    const lookupJson = await lookupRes.json()
-    const discountCode = lookupJson?.discount_code
-
-    if (!discountCode?.price_rule_id) {
-      return NextResponse.json(
-        { ok: false, error: "Codice sconto non valido o scaduto." },
-        { status: 400 },
-      )
-    }
-
-    const priceRuleId = discountCode.price_rule_id
-
-    // 2) Recupera la price rule per capire tipo e valore
-    const prUrl = `https://${shopDomain}/admin/api/${apiVersion}/price_rules/${priceRuleId}.json`
-    const prRes = await fetch(prUrl, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": adminToken,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    })
-
-    if (!prRes.ok) {
-      const txt = await prRes.text()
-      console.error("[price_rule] Errore:", prRes.status, txt)
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Errore nel recupero della regola di sconto da Shopify.",
-        },
-        { status: 500 },
-      )
-    }
-
-    const prJson = await prRes.json()
-    const priceRule = prJson?.price_rule
-
-    if (!priceRule) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Regola di sconto non trovata o non più valida.",
+            "Questo codice sconto usa un tipo avanzato non ancora supportato dal checkout.",
         },
         { status: 400 },
       )
     }
 
-    const valueType = priceRule.value_type as
-      | "percentage"
-      | "fixed_amount"
-      | "shipping"
-    const rawValue = Number(priceRule.value) // es. "-10.0" per 10%
-    const absValue = Math.abs(rawValue)
+    const customerGets = discountCodeObj.customerGets
+    const value = customerGets?.value
+    if (!value) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Valore di sconto non trovato per questo codice.",
+        },
+        { status: 400 },
+      )
+    }
 
-    if (valueType !== "percentage") {
+    // Può essere percentuale o importo fisso
+    let valueType: "percentage" | "fixed_amount" = "percentage"
+    let percentValue: number | null = null
+    let fixedAmount: number | null = null
+
+    if (value.__typename === "DiscountPercentage") {
+      valueType = "percentage"
+      percentValue = Number(value.percentage)
+    } else if (value.__typename === "DiscountAmount") {
+      valueType = "fixed_amount"
+      const amountObj = value.amount
+      fixedAmount = Number(amountObj?.amount || 0)
+    } else {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Questo codice sconto ha un tipo di valore non supportato (solo % o importo fisso).",
+        },
+        { status: 400 },
+      )
+    }
+
+    // Per iniziare, supportiamo principalmente gli sconti percentuali
+    if (valueType !== "percentage" || percentValue == null) {
       return NextResponse.json(
         {
           ok: false,
@@ -137,14 +200,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ✅ Risposta semplice per il frontend
     return NextResponse.json(
       {
         ok: true,
-        code: discountCode.code,
+        code: gqlCode,
         valueType, // "percentage"
-        percentValue: absValue, // es. 10
-        priceRuleId,
+        percentValue, // es. 10
       },
       { status: 200 },
     )
@@ -153,7 +214,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: err?.message || "Errore interno applicazione sconto.",
+        error:
+          err?.message || "Errore interno durante l'applicazione del codice.",
       },
       { status: 500 },
     )
