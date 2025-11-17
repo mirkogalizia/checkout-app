@@ -3,117 +3,244 @@ import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/firebaseAdmin"
 import { getConfig } from "@/lib/config"
 
-const COLLECTION = "cartSessions"
+type CustomerPayload = {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  address1: string
+  address2: string
+  city: string
+  province: string
+  zip: string
+  country: string
+}
+
+const CHECKOUT_SESSIONS_COLLECTION = "checkoutSessions"
+const FIXED_SHIPPING = 5.9 // EUR, come nel checkout esterno
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const sessionId = body.sessionId as string | undefined
-    const paymentIntentId = body.paymentIntentId as string | undefined
-    const customer = body.customer || {}
+    const body = await req.json().catch(() => null)
 
-    if (!sessionId) {
+    const sessionId = body?.sessionId as string | undefined
+    const paymentIntentId = body?.paymentIntentId as string | undefined
+    const customer = body?.customer as CustomerPayload | undefined
+
+    if (!sessionId || !paymentIntentId || !customer) {
       return NextResponse.json(
-        { error: "sessionId mancante" },
+        {
+          ok: false,
+          error:
+            "Parametri mancanti. Servono sessionId, paymentIntentId e customer.",
+        },
         { status: 400 },
       )
     }
 
-    // 1) recupera carrello
-    const snap = await db.collection(COLLECTION).doc(sessionId).get()
-    if (!snap.exists) {
+    // 1) Config da Firestore (Shopify)
+    const cfg = await getConfig()
+    const shopDomain = cfg.shopify?.shopDomain
+    const adminToken = cfg.shopify?.adminToken
+    const apiVersion = cfg.shopify?.apiVersion || "2024-10"
+
+    if (!shopDomain || !adminToken) {
+      console.error(
+        "[create-order] Config Shopify mancante. shopDomain/adminToken vuoti.",
+      )
       return NextResponse.json(
-        { error: "Carrello non trovato" },
+        {
+          ok: false,
+          error:
+            "Configurazione Shopify mancante. Completa l'onboarding con dominio e Admin API token.",
+        },
+        { status: 500 },
+      )
+    }
+
+    // 2) Recupera la sessione di checkout da Firestore
+    const ref = db
+      .collection(CHECKOUT_SESSIONS_COLLECTION)
+      .doc(String(sessionId))
+    const snap = await ref.get()
+
+    if (!snap.exists) {
+      console.error(
+        "[create-order] Nessuna sessione trovata per sessionId:",
+        sessionId,
+      )
+      return NextResponse.json(
+        { ok: false, error: "Sessione di checkout non trovata." },
         { status: 404 },
       )
     }
 
-    const data = snap.data() || {}
-    const items = Array.isArray(data.items) ? data.items : []
+    const sessionData = snap.data() || {}
+    const currency = (sessionData.currency as string | undefined) || "EUR"
 
-    // 2) config Shopify
-    const cfg = await getConfig()
-    const shopCfg = cfg.shopify || {}
-    const shopDomain: string = shopCfg.shopDomain
-    const adminToken: string = shopCfg.adminToken
-    const apiVersion: string = shopCfg.apiVersion || "2024-10"
+    const rawCart = sessionData.rawCart || {}
+    const rawItems: any[] = Array.isArray(rawCart.items)
+      ? rawCart.items
+      : Array.isArray(sessionData.items)
+      ? sessionData.items
+      : []
 
-    if (!shopDomain || !adminToken) {
-      console.error("[/api/shopify/create-order] Shopify non configurato")
+    if (!rawItems.length) {
+      console.error(
+        "[create-order] Nessun item nella sessione per sessionId:",
+        sessionId,
+      )
       return NextResponse.json(
-        { error: "Config Shopify mancante" },
-        { status: 500 },
+        {
+          ok: false,
+          error:
+            "Nessun articolo nel carrello per questa sessione. Impossibile creare ordine.",
+        },
+        { status: 400 },
       )
     }
 
-    // 3) line_items per Shopify (usiamo id variante e quantità)
-    const line_items = items.map((item: any) => ({
-      variant_id: item.id,
-      quantity: item.quantity || 1,
-    }))
+    // 3) Costruiamo le line_items con prezzo "finale" (già scontato)
+    //    così l'ordine Shopify ha gli stessi totali di Stripe.
+    const line_items = rawItems.map((item) => {
+      const variantId =
+        item.variant_id ?? item.id ?? item.product_id ?? undefined
+      const quantity = Number(item.quantity || 1)
 
+      // final_line_price è in centesimi per la riga intera
+      // (già include eventuali sconti)
+      const finalLineCents =
+        typeof item.final_line_price === "number"
+          ? item.final_line_price
+          : typeof item.discounted_price === "number"
+          ? item.discounted_price * quantity
+          : typeof item.linePriceCents === "number"
+          ? item.linePriceCents
+          : typeof item.priceCents === "number"
+          ? item.priceCents * quantity
+          : 0
+
+      const unitFinal = quantity > 0 ? finalLineCents / 100 / quantity : 0
+
+      return {
+        variant_id: variantId,
+        quantity,
+        // Forziamo il prezzo unitario a quello scontato, così
+        // Shopify vede già il prezzo finale e l'ordine torna
+        // allineato a quanto incassato da Stripe.
+        price: unitFinal.toFixed(2),
+      }
+    })
+
+    // 4) Shipping: usiamo 5,90 fissi come nel checkout esterno
+    const shipping_lines =
+      FIXED_SHIPPING > 0
+        ? [
+            {
+              title: "Spedizione Standard 24/48h",
+              price: FIXED_SHIPPING.toFixed(2),
+              code: "STANDARD",
+              source: "checkout-app",
+            },
+          ]
+        : []
+
+    // 5) Indirizzi da payload customer
+    const shipping_address = {
+      first_name: customer.firstName || "",
+      last_name: customer.lastName || "",
+      address1: customer.address1 || "",
+      address2: customer.address2 || "",
+      phone: customer.phone || "",
+      city: customer.city || "",
+      province: customer.province || "",
+      country: customer.country || "Italy",
+      zip: customer.zip || "",
+    }
+
+    const billing_address = {
+      ...shipping_address,
+    }
+
+    // 6) Payload ordine per Shopify
     const orderPayload = {
       order: {
         line_items,
-        email: customer.email,
-        financial_status: "paid", // PAGATO
-        // fulfillment_status: null  // rimane unfulfilled di default
-        note: paymentIntentId
-          ? `Pagamento Stripe PaymentIntent ${paymentIntentId}`
-          : "Pagamento Stripe",
-        shipping_address: {
-          first_name: customer.firstName,
-          last_name: customer.lastName,
-          address1: customer.address1,
-          address2: customer.address2 || "",
-          city: customer.city,
-          province: customer.province,
-          zip: customer.zip,
-          country_code: customer.country || "IT",
-          phone: customer.phone || undefined,
-        },
+        shipping_lines,
+        email: customer.email || undefined,
+        currency,
+        financial_status: "paid",
+        send_receipt: false,
+        send_fulfillment_receipt: false,
+        tags: "CHECKOUT_APP, EXTERNAL_CHECKOUT",
+        note: `Ordine creato dal checkout esterno. PaymentIntent: ${paymentIntentId}`,
+        shipping_address,
+        billing_address,
       },
     }
 
+    // 7) Chiamata a Shopify
     const url = `https://${shopDomain}/admin/api/${apiVersion}/orders.json`
 
-    const res = await fetch(url, {
+    const shopifyRes = await fetch(url, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": adminToken,
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
       body: JSON.stringify(orderPayload),
     })
 
-    if (!res.ok) {
-      const txt = await res.text()
-      console.error("[/api/shopify/create-order] Shopify error:", txt)
+    if (!shopifyRes.ok) {
+      const txt = await shopifyRes.text()
+      console.error(
+        "[create-order] Errore Shopify:",
+        shopifyRes.status,
+        txt,
+      )
       return NextResponse.json(
-        { error: "Errore creazione ordine Shopify" },
+        {
+          ok: false,
+          error:
+            "Errore nella creazione dell'ordine su Shopify. Controlla i log.",
+          details: txt,
+        },
         { status: 500 },
       )
     }
 
-    const json = await res.json()
-    const shopifyOrderId = json?.order?.id
+    const shopifyJson = await shopifyRes.json()
+    const order = shopifyJson.order
 
-    // salviamo id ordine su cartSession
-    await db.collection(COLLECTION).doc(sessionId).set(
+    // 8) Salviamo in Firestore l'id ordine creato
+    await ref.set(
       {
-        shopifyOrderId,
+        shopifyOrderId: order?.id,
+        shopifyOrderName: order?.name,
+        createdOrderAt: new Date().toISOString(),
       },
       { merge: true },
     )
 
     return NextResponse.json(
-      { ok: true, shopifyOrderId },
+      {
+        ok: true,
+        orderId: order?.id,
+        orderName: order?.name,
+        orderNumber: order?.order_number,
+      },
       { status: 200 },
     )
-  } catch (error: any) {
-    console.error("[/api/shopify/create-order] errore:", error)
+  } catch (err: any) {
+    console.error("[create-order] Errore generale:", err)
     return NextResponse.json(
-      { error: error.message || "Errore interno creazione ordine" },
+      {
+        ok: false,
+        error:
+          err?.message ||
+          "Errore interno nella creazione dell'ordine Shopify.",
+      },
       { status: 500 },
     )
   }

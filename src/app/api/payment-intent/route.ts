@@ -1,114 +1,240 @@
-// src/app/api/payment-intent/route.ts
-import { NextRequest, NextResponse } from "next/server"
-import Stripe from "stripe"
-import { db } from "@/lib/firebaseAdmin"
-import { getConfig } from "@/lib/config"
+import { NextRequest, NextResponse } from "next/server";
+import Stripe from "stripe";
+import { getConfig } from "@/lib/config";
+import { db } from "@/lib/firebaseAdmin";
 
-const COLLECTION = "cartSessions"
+type Customer = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  province: string;
+  zip: string;
+  country: string;
+};
+
+type CheckoutSessionDoc = {
+  sessionId: string;
+  currency?: string;
+  subtotalCents?: number;
+  shippingCents?: number;
+  totalCents?: number;
+  paymentIntentId?: string;
+  paymentIntentClientSecret?: string;
+  [key: string]: any;
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null)
-    const sessionId = body?.sessionId as string | undefined
+    const body = await req.json();
+    const sessionId = body.sessionId as string | undefined;
+    const customer = body.customer as Customer | undefined;
+    const shippingCentsFromClient = Number(body.shippingCents || 0);
 
     if (!sessionId) {
       return NextResponse.json(
-        { error: "sessionId mancante" },
+        { error: "sessionId mancante nella richiesta." },
         { status: 400 },
-      )
+      );
     }
 
-    // 1) Recupera la sessione carrello da Firestore
-    const snap = await db.collection(COLLECTION).doc(sessionId).get()
+    // 1) Config da Firebase
+    const cfg = await getConfig();
+
+    // scegli il primo account Stripe con secretKey valorizzata
+    const activeAccount =
+      cfg.stripeAccounts.find((a: any) => a.secretKey) ?? cfg.stripeAccounts[0];
+
+    if (!activeAccount?.secretKey) {
+      return NextResponse.json(
+        { error: "Nessun account Stripe configurato." },
+        { status: 500 },
+      );
+    }
+
+    // merchant_site opzionale, se lo hai aggiunto in config
+    const merchantSite: string | undefined =
+      (activeAccount as any).merchantSite || undefined;
+
+    const stripe = new Stripe(activeAccount.secretKey, {
+      apiVersion: "2025-10-29.clover" as any,
+    });
+
+    // 2) Recupera sessione carrello da Firestore
+    const ref = db.collection("checkoutSessions").doc(sessionId);
+    const snap = await ref.get();
 
     if (!snap.exists) {
       return NextResponse.json(
-        { error: "Nessun carrello trovato per questa sessione" },
+        { error: "Sessione di checkout non trovata." },
         { status: 404 },
-      )
+      );
     }
 
-    const data = snap.data() || {}
+    const session = snap.data() as CheckoutSessionDoc;
 
-    // Se abbiamo già un PaymentIntent salvato, riusa quello
-    if (data.paymentIntentClientSecret) {
-      return NextResponse.json(
-        { clientSecret: data.paymentIntentClientSecret },
-        { status: 200 },
-      )
-    }
+    const subtotalCents = Number(session.subtotalCents || 0);
+    const sessionShippingCents = Number(session.shippingCents || 0);
 
-    const currency = (data.currency || "EUR").toString().toLowerCase()
-
-    const subtotalCents =
-      typeof data.subtotalCents === "number"
-        ? data.subtotalCents
-        : typeof data.totals?.subtotal === "number"
-        ? data.totals.subtotal
-        : 0
-
+    // shipping usata nel totale:
+    // priorità: totalCents salvato in sessione (ideale, già con sconti)
+    // fallback: subtotal + shipping
     const shippingCents =
-      typeof data.shippingCents === "number" ? data.shippingCents : 0
+      shippingCentsFromClient > 0
+        ? shippingCentsFromClient
+        : sessionShippingCents;
 
     const totalCents =
-      typeof data.totalCents === "number"
-        ? data.totalCents
-        : subtotalCents + shippingCents
+      typeof session.totalCents === "number" && session.totalCents > 0
+        ? Number(session.totalCents)
+        : subtotalCents + shippingCents;
 
-    if (!totalCents || totalCents < 50) {
+    if (!totalCents || totalCents <= 0) {
       return NextResponse.json(
-        {
-          error:
-            "Importo non valido. Verifica il totale ordine prima di procedere al pagamento.",
-        },
+        { error: "Importo totale non valido per il payment intent." },
         { status: 400 },
-      )
+      );
     }
 
-    // 2) Prende la secret di Stripe da Firebase config (onboarding)
-    const cfg = await getConfig()
+    const currency =
+      (session.currency || cfg.defaultCurrency || "eur").toLowerCase();
 
-    const firstStripe =
-      (cfg.stripeAccounts || []).find((a: any) => a.secretKey) || null
+    // 3) Costruisci eventualmente shipping per Stripe (senza far impazzire TS)
+    let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined;
 
-    const secretKey =
-      firstStripe?.secretKey || process.env.STRIPE_SECRET_KEY || ""
+    if (customer) {
+      const fullName = `${customer.firstName || ""} ${
+        customer.lastName || ""
+      }`.trim();
 
-    if (!secretKey) {
-      console.error("[/api/payment-intent] Nessuna Stripe secret key configurata")
-      return NextResponse.json(
-        { error: "Configurazione Stripe mancante" },
-        { status: 500 },
-      )
+      const hasAddressCore =
+        fullName ||
+        customer.address1 ||
+        customer.city ||
+        customer.zip ||
+        customer.country;
+
+      if (hasAddressCore) {
+        shipping = {
+          name: fullName || customer.firstName || customer.lastName || "Cliente",
+          phone: customer.phone || undefined,
+          address: {
+            line1: customer.address1 || "",
+            line2: customer.address2 || undefined,
+            postal_code: customer.zip || "",
+            city: customer.city || "",
+            state: customer.province || "",
+            country: customer.country || "IT",
+          },
+        };
+      }
     }
 
-    const stripe = new Stripe(secretKey)
+    // 4) Se esiste già un paymentIntent nella sessione, prova a riutilizzarlo
+    if (session.paymentIntentId) {
+      try {
+        const existing = await stripe.paymentIntents.retrieve(
+          session.paymentIntentId,
+        );
 
-    // 3) Crea un PaymentIntent SOLO CARTA se non esiste già
-    const paymentIntent = await stripe.paymentIntents.create({
+        if (
+          existing &&
+          existing.status !== "canceled" &&
+          existing.currency === currency &&
+          existing.amount === totalCents
+        ) {
+          return NextResponse.json(
+            {
+              clientSecret: existing.client_secret,
+              paymentIntentId: existing.id,
+            },
+            { status: 200 },
+          );
+        }
+        // se amount o currency non coincidono, lo aggiorniamo
+        if (
+          existing &&
+          existing.status !== "canceled" &&
+          (existing.amount !== totalCents || existing.currency !== currency)
+        ) {
+          const updated = await stripe.paymentIntents.update(existing.id, {
+            amount: totalCents,
+            currency,
+            ...(shipping ? { shipping } : {}),
+            metadata: {
+              sessionId,
+              ...(merchantSite ? { merchant_site: merchantSite } : {}),
+            },
+          });
+
+          await ref.set(
+            {
+              paymentIntentId: updated.id,
+              paymentIntentClientSecret: updated.client_secret,
+            },
+            { merge: true },
+          );
+
+          return NextResponse.json(
+            {
+              clientSecret: updated.client_secret,
+              paymentIntentId: updated.id,
+            },
+            { status: 200 },
+          );
+        }
+      } catch (e) {
+        console.warn(
+          "[payment-intent] impossibile riutilizzare paymentIntent esistente, ne creo uno nuovo.",
+          e,
+        );
+      }
+    }
+
+    // 5) Crea un nuovo PaymentIntent
+    const createParams: Stripe.PaymentIntentCreateParams = {
       amount: totalCents,
       currency,
-      payment_method_types: ["card"], // << SOLO carta
+      payment_method_types: ["card"],
+      automatic_payment_methods: {
+        enabled: true,
+      },
       metadata: {
         sessionId,
+        ...(merchantSite ? { merchant_site: merchantSite } : {}),
       },
-    })
+      ...(shipping ? { shipping } : {}),
+    };
 
-    // 4) Salva info del PaymentIntent dentro alla sessione carrello
-    await db.collection(COLLECTION).doc(sessionId).update({
-      paymentIntentId: paymentIntent.id,
-      paymentIntentClientSecret: paymentIntent.client_secret,
-    })
+    const pi = await stripe.paymentIntents.create(createParams);
+
+    // 6) Salva nel documento sessione
+    await ref.set(
+      {
+        paymentIntentId: pi.id,
+        paymentIntentClientSecret: pi.client_secret,
+        totalCents,
+      },
+      { merge: true },
+    );
 
     return NextResponse.json(
-      { clientSecret: paymentIntent.client_secret },
+      {
+        clientSecret: pi.client_secret,
+        paymentIntentId: pi.id,
+      },
       { status: 200 },
-    )
-  } catch (error: any) {
-    console.error("[/api/payment-intent] errore:", error)
+    );
+  } catch (err: any) {
+    console.error("[/api/payment-intent] errore:", err);
     return NextResponse.json(
-      { error: error.message || "Errore interno nella creazione del pagamento" },
+      {
+        error: err?.message || "Errore interno nella creazione del payment intent.",
+      },
       { status: 500 },
-    )
+    );
   }
 }

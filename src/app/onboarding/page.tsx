@@ -28,17 +28,36 @@ export default function OnboardingPage() {
     const formData = new FormData(e.currentTarget);
 
     const payload = {
-      shopifyDomain: formData.get("shopifyDomain") as string,
-      shopifyAdminToken: formData.get("shopifyAdminToken") as string,
-      shopifyStorefrontToken: formData.get("shopifyStorefrontToken") as string,
+      // 🔹 Config Shopify salvata come oggetto "shopify"
+      shopify: {
+        shopDomain: (formData.get("shopifyDomain") as string) || "",
+        adminToken: (formData.get("shopifyAdminToken") as string) || "",
+        storefrontToken:
+          (formData.get("shopifyStorefrontToken") as string) || "",
+        apiVersion: "2024-10",
+      },
+
+      // 🔹 Stripe multi-account, con merchantSite + active + order
       stripeAccounts: STRIPE_ACCOUNTS.map((acc, index) => ({
-        label: formData.get(`${acc.name}-label`) as string,
-        secretKey: formData.get(`${acc.name}-secret`) as string,
-        webhookSecret: formData.get(`${acc.name}-webhook`) as string,
+        label:
+          ((formData.get(`${acc.name}-label`) as string) ||
+            acc.label) ?? `Account ${index + 1}`,
+        secretKey: ((formData.get(`${acc.name}-secret`) as string) || "").trim(),
+        webhookSecret:
+          ((formData.get(`${acc.name}-webhook`) as string) || "").trim(),
         active: formData.get(`${acc.name}-active`) === "on",
         order: index,
+        merchantSite:
+          ((formData.get(`${acc.name}-merchantSite`) as string) || "").trim(),
       })),
-      defaultCurrency: (formData.get("defaultCurrency") as string) || "EUR",
+
+      // 🔹 Default currency + dominio checkout
+      defaultCurrency: (
+        (formData.get("defaultCurrency") as string) ||
+        "eur"
+      ).toLowerCase(),
+      checkoutDomain:
+        (typeof window !== "undefined" ? window.location.origin : "") || "",
     };
 
     try {
@@ -76,8 +95,9 @@ export default function OnboardingPage() {
               Collega Shopify, Stripe e Firebase
             </h1>
             <p className="mt-2 text-sm text-slate-400 max-w-xl">
-              Configura una sola volta, poi il tuo checkout custom gestirà in automatico
-              carrelli, pagamenti multi-account Stripe e sincronizzazione ordini.
+              Configura una sola volta, poi il tuo checkout custom gestirà in
+              automatico carrelli, pagamenti multi-account Stripe e
+              sincronizzazione ordini.
             </p>
           </div>
 
@@ -86,8 +106,8 @@ export default function OnboardingPage() {
               Stato onboarding
             </p>
             <p className="text-sm text-slate-400">
-              Completa i campi essenziali e salva la configurazione. I dati vengono
-              memorizzati in Firebase e riutilizzati dal backend.
+              Completa i campi essenziali e salva la configurazione. I dati
+              vengono memorizzati in Firebase e riutilizzati dal backend.
             </p>
           </div>
         </header>
@@ -237,6 +257,18 @@ export default function OnboardingPage() {
                           placeholder="whsec_*** (opzionale ma consigliato)"
                         />
                       </div>
+
+                      {/* 👇 nuovo campo: merchant site per metadata / descriptor */}
+                      <div>
+                        <label className="glass-label">
+                          Merchant site (per metadata / descriptor)
+                        </label>
+                        <input
+                          name={`${acc.name}-merchantSite`}
+                          className="glass-input"
+                          placeholder="es. https://notforresale.it"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -253,17 +285,25 @@ export default function OnboardingPage() {
                 Firebase Firestore
               </h2>
               <p className="text-sm text-slate-400">
-                I dati inseriti qui vengono salvati su Firestore (collezione tipo
+                I dati inseriti qui vengono salvati su Firestore (collezione
                 <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-black/40 border border-white/5 ml-1">
-                  appConfig
+                  config/global
                 </span>
                 ) e letti dalle API:
               </p>
               <ul className="text-[11px] text-slate-400 space-y-1.5">
-                <li>• <code className="font-mono">/api/cart-session</code></li>
-                <li>• <code className="font-mono">/api/payments</code></li>
-                <li>• <code className="font-mono">/api/shopify-cart</code></li>
-                <li>• <code className="font-mono">/api/stripe</code> (webhook)</li>
+                <li>
+                  • <code className="font-mono">/api/cart-session</code>
+                </li>
+                <li>
+                  • <code className="font-mono">/api/payment-intent</code>
+                </li>
+                <li>
+                  • <code className="font-mono">/api/shopify/create-order</code>
+                </li>
+                <li>
+                  • <code className="font-mono">/api/discount/apply</code>
+                </li>
               </ul>
             </section>
 
@@ -298,8 +338,8 @@ export default function OnboardingPage() {
               </div>
 
               <p className="text-[11px] text-slate-500">
-                Puoi modificare questi valori in qualsiasi momento. Le nuove config
-                verranno usate dalle prossime sessioni di checkout.
+                Puoi modificare questi valori in qualsiasi momento. Le nuove
+                config verranno usate dalle prossime sessioni di checkout.
               </p>
             </section>
           </aside>
