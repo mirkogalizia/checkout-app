@@ -139,6 +139,7 @@ function CheckoutInner({
     )
   }
 
+  // ✅ FIX: useEffect con dependencies corrette
   useEffect(() => {
     async function calculateShipping() {
       if (!isFormValid()) {
@@ -153,6 +154,7 @@ function CheckoutInner({
       setShippingError(null)
 
       try {
+        // 1. Calcola spedizione da Shopify
         const shippingRes = await fetch("/api/calculate-shipping", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -176,8 +178,19 @@ function CheckoutInner({
         const newShippingCents = shippingData.shippingCents || 0
         setCalculatedShippingCents(newShippingCents)
 
-        const newTotalCents = subtotalCents - discountCents + newShippingCents
+        // 2. Calcola totale corretto: subtotale - sconto + spedizione
+        const currentDiscountCents = subtotalCents + newShippingCents - totalFromSession
+        const finalDiscountCents = currentDiscountCents > 0 ? currentDiscountCents : 0
+        const newTotalCents = subtotalCents - finalDiscountCents + newShippingCents
 
+        console.log("[checkout] Calcolo totale:", {
+          subtotalCents,
+          newShippingCents,
+          finalDiscountCents,
+          newTotalCents,
+        })
+
+        // 3. Crea/aggiorna PaymentIntent
         const piRes = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -215,16 +228,19 @@ function CheckoutInner({
 
     calculateShipping()
   }, [
+    // ✅ FIX: Dependencies corrette - solo i campi che l'utente modifica
     customer.fullName,
     customer.email,
+    customer.phone, // ✅ Aggiunto
     customer.address1,
+    customer.address2, // ✅ Aggiunto
     customer.city,
     customer.postalCode,
     customer.province,
     customer.countryCode,
     sessionId,
     subtotalCents,
-    discountCents,
+    totalFromSession, // ✅ Cambiato da discountCents a totalFromSession
   ])
 
   async function handleSubmit(e: FormEvent) {
