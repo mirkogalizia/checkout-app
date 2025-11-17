@@ -6,14 +6,41 @@ import { getConfig } from "@/lib/config"
 
 const COLLECTION = "cartSessions"
 
+type CustomerPayload = {
+  fullName?: string
+  firstName?: string
+  lastName?: string
+  email?: string
+  phone?: string
+  address1?: string
+  address2?: string
+  city?: string
+  postalCode?: string
+  province?: string
+  countryCode?: string
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null)
+
     const sessionId = body?.sessionId as string | undefined
+    const amountCents = body?.amountCents as number | undefined
+    const customerBody = (body?.customer || {}) as CustomerPayload
 
     if (!sessionId) {
       return NextResponse.json(
         { error: "sessionId mancante" },
+        { status: 400 },
+      )
+    }
+
+    if (typeof amountCents !== "number" || amountCents < 50) {
+      return NextResponse.json(
+        {
+          error:
+            "Importo non valido o mancante. Assicurati di passare amountCents (in centesimi) dal frontend.",
+        },
         { status: 400 },
       )
     }
@@ -41,92 +68,24 @@ export async function POST(req: NextRequest) {
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
     // ---------------------------------------------------
-    // 2) Calcolo importo basato sui dati Shopify
+    // 2) Dati cliente SOLO dal body (form checkout)
     // ---------------------------------------------------
-    const subtotalCents =
-      typeof data.subtotalCents === "number"
-        ? data.subtotalCents
-        : typeof data.totals?.subtotal === "number"
-        ? data.totals.subtotal
-        : 0
-
-    const shippingCents =
-      typeof data.shippingCents === "number" ? data.shippingCents : 0
-
-    const totalFromSession =
-      typeof data.totalCents === "number" ? data.totalCents : 0
-
-    const rawCart = data.rawCart || {}
-
-    let totalFromRawCart = 0
-    if (typeof rawCart.total_price === "number") {
-      totalFromRawCart = rawCart.total_price
-    } else if (typeof rawCart.total_price === "string") {
-      const parsed = parseInt(rawCart.total_price, 10)
-      if (!Number.isNaN(parsed)) {
-        totalFromRawCart = parsed
-      }
-    }
-
-    // PRIORITÀ:
-    // 1) totale Shopify (sconti + spedizione)
-    // 2) totalCents salvato in sessione
-    // 3) subtotal + shipping
-    let amountCents = 0
-
-    if (totalFromRawCart > 0) {
-      amountCents = totalFromRawCart
-    } else if (totalFromSession > 0) {
-      amountCents = totalFromSession
-    } else {
-      amountCents = subtotalCents + shippingCents
-    }
-
-    if (!amountCents || amountCents < 50) {
-      console.warn("[/api/payment-intent] amountCents non valido:", {
-        subtotalCents,
-        shippingCents,
-        totalFromSession,
-        totalFromRawCart,
-        amountCents,
-      })
-
-      return NextResponse.json(
-        {
-          error:
-            "Importo non valido. Verifica il totale ordine prima di procedere al pagamento.",
-        },
-        { status: 400 },
-      )
-    }
-
-    // ---------------------------------------------------
-    // 3) Dati cliente (da Firestore + dal body, se presenti)
-    // ---------------------------------------------------
-    const customerFromDb = (data.customer || {}) as any
-    const customerFromBody = (body?.customer || {}) as any
-
-    // il body (dalla form del checkout) override-a eventuali dati in Firestore
-    const customer = { ...customerFromDb, ...customerFromBody }
-
     const fullNameRaw =
-      customer.fullName ||
-      `${customer.firstName || ""} ${customer.lastName || ""}`
+      customerBody.fullName ||
+      `${customerBody.firstName || ""} ${customerBody.lastName || ""}`
 
     const fullName = (fullNameRaw || "").trim()
-    const email = (customer.email || customer.contactEmail || "").trim()
-    const phone = (customer.phone || "").trim()
+    const email = (customerBody.email || "").trim()
+    const phone = (customerBody.phone || "").trim()
 
-    // shipping address: usiamo i campi classici della form
     const address1 =
-      customer.address1 || customer.address || customer.street || ""
-    const address2 = customer.address2 || ""
-    const city = customer.city || ""
-    const postalCode = customer.postalCode || customer.zip || ""
-    const province = customer.province || customer.state || ""
-    const countryCode = customer.countryCode || customer.country || "IT"
+      customerBody.address1 || customerBody.address2 || "" // address2 lo usiamo solo come fallback
+    const address2 = customerBody.address2 || ""
+    const city = customerBody.city || ""
+    const postalCode = customerBody.postalCode || ""
+    const province = customerBody.province || ""
+    const countryCode = customerBody.countryCode || "IT"
 
-    // Prepariamo shipping SOLO se abbiamo almeno un minimo di dati
     let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined =
       undefined
 
@@ -146,7 +105,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ---------------------------------------------------
-    // 4) Config Stripe da Firebase (merchantSite, label, ecc.)
+    // 3) Config Stripe da Firebase (merchantSite, label, ecc.)
     // ---------------------------------------------------
     const cfg = await getConfig()
 
@@ -180,7 +139,6 @@ export async function POST(req: NextRequest) {
 
     const stripe = new Stripe(secretKey)
 
-    // descrizione ordine (simile a CarShield: "orderId | customer")
     const firstItemTitle =
       Array.isArray(data.items) && data.items[0]?.title
         ? String(data.items[0].title)
@@ -198,7 +156,7 @@ export async function POST(req: NextRequest) {
     const description = descriptionParts.join(" | ")
 
     // ---------------------------------------------------
-    // 5) Crea PaymentIntent SOLO CARTA, con metadata e shipping
+    // 4) Crea il PaymentIntent con amountCents passato dal frontend
     // ---------------------------------------------------
     const params: Stripe.PaymentIntentCreateParams = {
       amount: amountCents,
@@ -213,7 +171,6 @@ export async function POST(req: NextRequest) {
         first_item_title: firstItemTitle,
       },
 
-      // come CarShield: suffisso tipo "NFR"
       statement_descriptor_suffix: statementDescriptorSuffix,
     }
 
@@ -231,14 +188,11 @@ export async function POST(req: NextRequest) {
 
     const paymentIntent = await stripe.paymentIntents.create(params)
 
-    // ---------------------------------------------------
-    // 6) Salva info del PaymentIntent dentro alla sessione carrello
-    // ---------------------------------------------------
+    // 5) Salva info del PaymentIntent + cliente in Firestore
     await db.collection(COLLECTION).doc(sessionId).update({
       paymentIntentId: paymentIntent.id,
       paymentIntentClientSecret: paymentIntent.client_secret,
       stripeAccountLabel: firstStripe?.label || null,
-      // utile avere anche una copia dei dati cliente lato server
       customer: {
         fullName,
         email,

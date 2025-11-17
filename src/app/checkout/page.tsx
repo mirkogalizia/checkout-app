@@ -1,20 +1,25 @@
+// src/app/checkout/page.tsx
 "use client"
 
 import React, {
-  Suspense,
   useEffect,
   useMemo,
   useState,
   ChangeEvent,
+  FormEvent,
+  Suspense,
 } from "react"
 import { useSearchParams } from "next/navigation"
 import { loadStripe } from "@stripe/stripe-js"
 import {
   Elements,
   PaymentElement,
-  useElements,
   useStripe,
+  useElements,
 } from "@stripe/react-stripe-js"
+
+// forziamo render dinamico per evitare prerender statico
+export const dynamic = "force-dynamic"
 
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
@@ -37,771 +42,738 @@ type CartSessionResponse = {
   subtotalCents?: number
   shippingCents?: number
   totalCents?: number
+  paymentIntentClientSecret?: string
+  discountCodes?: { code: string }[]
   rawCart?: any
+  error?: string
 }
 
-type Customer = {
-  firstName: string
-  lastName: string
+type CustomerForm = {
+  fullName: string
   email: string
   phone: string
   address1: string
   address2: string
   city: string
+  postalCode: string
   province: string
-  zip: string
-  country: string
+  countryCode: string
 }
 
-const FIXED_SHIPPING_CENTS = 590
-
-/* ---------------------------------------------
-   INPUT GENERICO
----------------------------------------------- */
-
-type InputProps = React.InputHTMLAttributes<HTMLInputElement>
-
-function Input(props: InputProps) {
-  const { className = "", ...rest } = props
-  return (
-    <input
-      className={[
-        "w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900",
-        "placeholder:text-gray-400",
-        "focus:outline-none focus:ring-2 focus:ring-black focus:border-black",
-        "transition-shadow",
-        className,
-      ].join(" ")}
-      {...rest}
-    />
-  )
+function formatMoney(cents: number | undefined, currency: string = "EUR") {
+  const value = (cents ?? 0) / 100
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(value)
 }
 
-/* ---------------------------------------------
-   PAGE INNER
----------------------------------------------- */
+function CheckoutInner({
+  cart,
+  sessionId,
+  clientSecret,
+  setClientSecret,
+}: {
+  cart: CartSessionResponse
+  sessionId: string
+  clientSecret: string | null
+  setClientSecret: (s: string) => void
+}) {
+  const stripe = useStripe()
+  const elements = useElements()
 
-function CheckoutPageInner() {
-  const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId") || ""
-
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const [items, setItems] = useState<CheckoutItem[]>([])
-  const [rawCartItems, setRawCartItems] = useState<any[]>([])
-  const [currency, setCurrency] = useState("EUR")
-  const [discountCodeLabel, setDiscountCodeLabel] = useState<string | null>(
-    null,
-  )
-
-  // prezzi
-  const [originalSubtotalCents, setOriginalSubtotalCents] = useState(0) // prezzo pieno
-  const [discountedSubtotalCents, setDiscountedSubtotalCents] = useState(0) // dopo tutti gli sconti
-  const [discountCents, setDiscountCents] = useState(0)
-  const [shippingCents, setShippingCents] = useState(0)
-  const [totalCents, setTotalCents] = useState(0)
-
-  const [clientSecret, setClientSecret] = useState<string | null>(null)
-
-  const [customer, setCustomer] = useState<Customer>({
-    firstName: "",
-    lastName: "",
+  const [customer, setCustomer] = useState<CustomerForm>({
+    fullName: "",
     email: "",
     phone: "",
     address1: "",
     address2: "",
     city: "",
+    postalCode: "",
     province: "",
-    zip: "",
-    country: "IT",
+    countryCode: "IT",
   })
 
-  /* ---------------------------------------------
-     CARICA SESSIONE CARRELLO
-  ---------------------------------------------- */
-  useEffect(() => {
-    if (!sessionId) {
-      setError("Nessuna sessione di checkout trovata.")
-      setLoading(false)
-      return
-    }
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
-    ;(async () => {
-      try {
-        setLoading(true)
-        const res = await fetch(
-          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
-        )
-        const json = await res.json()
+  // ---------- TOTALE / SCONTO / SPEDIZIONE ----------
 
-        if (!res.ok) {
-          setError(json.error || "Errore nel recupero del carrello")
-          setLoading(false)
-          return
-        }
+  const currency = (cart.currency || "EUR").toUpperCase()
 
-        const data = json as CartSessionResponse
+  const subtotalCents = useMemo(() => {
+    if (typeof cart.subtotalCents === "number") return cart.subtotalCents
+    // fallback: somma delle righe
+    return cart.items.reduce((sum, item) => {
+      const line = item.linePriceCents ?? item.priceCents ?? 0
+      return sum + line
+    }, 0)
+  }, [cart])
 
-        setItems(data.items || [])
-        setCurrency((data.currency || "EUR").toUpperCase())
+  const shippingCents = useMemo(() => {
+    if (typeof cart.shippingCents === "number") return cart.shippingCents
+    return 0
+  }, [cart])
 
-        const raw = (data.rawCart as any) || {}
-        setRawCartItems(Array.isArray(raw.items) ? raw.items : [])
+  const totalFromSession =
+    typeof cart.totalCents === "number"
+      ? cart.totalCents
+      : subtotalCents + shippingCents
 
-        // prendi l’eventuale codice sconto dal carrello Shopify
-        const codes = raw.discount_codes || []
-        if (Array.isArray(codes) && codes.length > 0 && codes[0]?.code) {
-          setDiscountCodeLabel(codes[0].code)
-        } else if (
-          Array.isArray(raw.cart_level_discount_applications) &&
-          raw.cart_level_discount_applications.length > 0 &&
-          raw.cart_level_discount_applications[0]?.title
-        ) {
-          setDiscountCodeLabel(raw.cart_level_discount_applications[0].title)
-        } else {
-          setDiscountCodeLabel(null)
-        }
+  const discountCents = useMemo(() => {
+    // sconto = (subtotale + spedizione) - totale effettivo
+    const raw = subtotalCents + shippingCents - totalFromSession
+    return raw > 0 ? raw : 0
+  }, [subtotalCents, shippingCents, totalFromSession])
 
-        setError(null)
-      } catch (err) {
-        console.error(err)
-        setError("Errore nel caricamento del carrello")
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [sessionId])
+  const totalToPayCents = totalFromSession
 
-  /* ---------------------------------------------
-     RICALCOLO SUBTOTALI DA items[]
-     (così includiamo TUTTI gli sconti reali)
-  ---------------------------------------------- */
-  useEffect(() => {
-    if (!items.length) {
-      setOriginalSubtotalCents(0)
-      setDiscountedSubtotalCents(0)
-      setDiscountCents(0)
-      setTotalCents(0)
-      return
-    }
+  // ---------- HANDLER FORM ----------
 
-    let original = 0
-    let discounted = 0
-
-    for (const it of items) {
-      const q = Number(it.quantity || 1)
-      const base = Number(it.priceCents || 0)
-      const lineTotal =
-        typeof it.linePriceCents === "number"
-          ? Number(it.linePriceCents)
-          : base * q
-
-      original += base * q
-      discounted += lineTotal
-    }
-
-    setOriginalSubtotalCents(original)
-    setDiscountedSubtotalCents(discounted)
-    setDiscountCents(Math.max(0, original - discounted))
-    // il totale finale verrà ricalcolato nell’effetto spedizione
-  }, [items])
-
-  /* ---------------------------------------------
-     GESTIONE CAMPI INDIRIZZO + SPEDIZIONE 5,90
-  ---------------------------------------------- */
-  function handleCustomerChange(
-    field: keyof Customer,
-    e: ChangeEvent<HTMLInputElement>,
+  function handleChange(
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) {
-    const value = e.target.value
-    setCustomer(prev => ({ ...prev, [field]: value }))
+    const { name, value } = e.target
+    setCustomer((prev) => ({ ...prev, [name]: value }))
   }
 
-  useEffect(() => {
-    const requiredOk =
-      customer.firstName.trim() &&
-      customer.lastName.trim() &&
-      customer.email.trim() &&
-      customer.address1.trim() &&
-      customer.zip.trim() &&
-      customer.city.trim() &&
-      customer.province.trim() &&
-      customer.country.trim()
+  function isFormValid() {
+    return (
+      customer.fullName.trim().length > 2 &&
+      customer.email.includes("@") &&
+      customer.address1.trim().length > 3 &&
+      customer.city.trim().length > 1 &&
+      customer.postalCode.trim().length > 2 &&
+      customer.province.trim().length > 1 &&
+      customer.countryCode.trim().length >= 2
+    )
+  }
 
-    if (requiredOk) {
-      const ship = FIXED_SHIPPING_CENTS
-      setShippingCents(ship)
-      setTotalCents(discountedSubtotalCents + ship)
-    } else {
-      setShippingCents(0)
-      setTotalCents(discountedSubtotalCents)
+  // ---------- CREA PAYMENT INTENT + CONFERMA ----------
+
+  async function ensurePaymentIntent(): Promise<string> {
+    // se l'abbiamo già, riusa
+    if (clientSecret) return clientSecret
+
+    const res = await fetch("/api/payment-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        amountCents: totalToPayCents,
+        customer: {
+          fullName: customer.fullName,
+          email: customer.email,
+          phone: customer.phone,
+          address1: customer.address1,
+          address2: customer.address2,
+          city: customer.city,
+          postalCode: customer.postalCode,
+          province: customer.province,
+          countryCode: customer.countryCode || "IT",
+        },
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.clientSecret) {
+      throw new Error(
+        data?.error || "Errore nella creazione del pagamento.",
+      )
     }
-  }, [customer, discountedSubtotalCents])
 
-  /* ---------------------------------------------
-     CREA / AGGIORNA PAYMENT INTENT STRIPE
-  ---------------------------------------------- */
-  useEffect(() => {
-    if (!sessionId) return
-    if (!discountedSubtotalCents) return // niente carrello => niente PI
-
-    ;(async () => {
-      try {
-        const res = await fetch("/api/payment-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            shippingCents,
-            customer,
-            // 🔹 passiamo anche gli importi per il backend
-            subtotalCents: discountedSubtotalCents,
-            totalCents,
-          }),
-        })
-        const data = await res.json()
-        if (!res.ok) {
-          console.error("Errore payment-intent:", data)
-          return
-        }
-        setClientSecret(data.clientSecret)
-      } catch (err) {
-        console.error("Errore payment-intent:", err)
-      }
-    })()
-  }, [sessionId, discountedSubtotalCents, shippingCents, totalCents, customer])
-
-  const itemsCount = useMemo(
-    () => items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
-    [items],
-  )
-
-  const subtotalProductsFormatted = (originalSubtotalCents / 100).toFixed(2)
-  const subtotalAfterDiscountFormatted = (discountedSubtotalCents / 100).toFixed(
-    2,
-  )
-  const discountFormatted = (discountCents / 100).toFixed(2)
-  const shippingFormatted = (shippingCents / 100).toFixed(2)
-  const totalFormatted = (totalCents / 100).toFixed(2)
-
-  if (loading) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-white text-black">
-        <div className="text-sm text-gray-600">Caricamento checkout…</div>
-      </main>
-    )
+    setClientSecret(data.clientSecret)
+    return data.clientSecret as string
   }
 
-  if (error) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-white text-black p-4">
-        <div className="max-w-md w-full border border-red-200 rounded-2xl p-5 bg-red-50 text-center">
-          <h1 className="text-lg font-semibold mb-2">Errore checkout</h1>
-          <p className="text-sm text-red-700 mb-4">{error}</p>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center rounded-full bg-black text-white px-4 py-2 text-sm font-medium"
-          >
-            Torna allo shop
-          </a>
-        </div>
-      </main>
-    )
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSuccess(false)
+
+    if (!isFormValid()) {
+      setError("Compila tutti i campi obbligatori per procedere al pagamento.")
+      return
+    }
+
+    if (!stripe || !elements) {
+      setError("Stripe non è ancora pronto, riprova tra qualche secondo.")
+      return
+    }
+
+    try {
+      setLoading(true)
+
+      // 1) Assicura che esista il PaymentIntent con importo corretto
+      await ensurePaymentIntent()
+
+      // 2) Conferma il pagamento passando i dati cliente a Stripe
+      const { error: stripeError } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          payment_method_data: {
+            billing_details: {
+              name: customer.fullName,
+              email: customer.email,
+              phone: customer.phone || undefined,
+              address: {
+                line1: customer.address1,
+                line2: customer.address2 || undefined,
+                city: customer.city,
+                postal_code: customer.postalCode,
+                state: customer.province,
+                country: customer.countryCode || "IT",
+              },
+            },
+          },
+          shipping: {
+            name: customer.fullName,
+            phone: customer.phone || undefined,
+            address: {
+              line1: customer.address1,
+              line2: customer.address2 || undefined,
+              city: customer.city,
+              postal_code: customer.postalCode,
+              state: customer.province,
+              country: customer.countryCode || "IT",
+            },
+          },
+          // return_url opzionale se vuoi redirect post-pagamento
+          // return_url: "https://notforresale.it/pages/ordine-completato",
+        },
+        redirect: "if_required",
+      })
+
+      if (stripeError) {
+        console.error("Stripe error:", stripeError)
+        setError(stripeError.message || "Pagamento non riuscito.")
+        setLoading(false)
+        return
+      }
+
+      setSuccess(true)
+      setLoading(false)
+    } catch (err: any) {
+      console.error("Errore pagamento:", err)
+      setError(err.message || "Errore imprevisto durante il pagamento.")
+      setLoading(false)
+    }
   }
 
   return (
-    <main className="min-h-screen bg-white text-black px-4 py-6 md:px-6 lg:px-10">
-      {/* HEADER con logo più grande, click = back al carrello Shopify */}
-      <header className="mb-8 flex flex-col items-center gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            if (typeof window !== "undefined") {
-              window.history.back()
-            }
-          }}
-          className="inline-flex items-center justify-center"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
-            alt="NOT FOR RESALE"
-            className="h-12 md:h-14 w-auto"
-          />
-        </button>
-      </header>
-
-      <div className="mx-auto max-w-6xl grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
-        {/* COLONNA SINISTRA: dati + articoli */}
-        <section className="space-y-8">
-          {/* TITOLO */}
+    <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-4 py-8">
+      <div className="w-full max-w-5xl grid gap-8 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        {/* Colonna sinistra: dati spedizione + pagamento */}
+        <section className="space-y-6">
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
+            <p className="text-xs text-slate-400 uppercase tracking-[0.18em]">
               Checkout
-            </h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Completa i dati di spedizione e paga in modo sicuro.
             </p>
+            <h1 className="mt-2 text-2xl md:text-3xl font-semibold">
+              Completa i dati di spedizione e paga in modo sicuro.
+            </h1>
           </div>
 
-          {/* DATI SPEDIZIONE */}
-          <div className="border border-gray-200 rounded-3xl p-5 md:p-6 bg-white shadow-sm">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-4">
-              Dati di spedizione
-            </h2>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <Input
-                placeholder="Nome"
-                value={customer.firstName}
-                onChange={e => handleCustomerChange("firstName", e)}
-              />
-              <Input
-                placeholder="Cognome"
-                value={customer.lastName}
-                onChange={e => handleCustomerChange("lastName", e)}
-              />
-            </div>
-
-            <div className="mt-3 space-y-3">
-              <Input
-                placeholder="Email"
-                type="email"
-                value={customer.email}
-                onChange={e => handleCustomerChange("email", e)}
-              />
-              <Input
-                placeholder="Telefono"
-                value={customer.phone}
-                onChange={e => handleCustomerChange("phone", e)}
-              />
-              <Input
-                placeholder="Indirizzo"
-                value={customer.address1}
-                onChange={e => handleCustomerChange("address1", e)}
-              />
-              <Input
-                placeholder="Interno, scala, citofono (opzionale)"
-                value={customer.address2}
-                onChange={e => handleCustomerChange("address2", e)}
-              />
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <Input
-                  placeholder="CAP"
-                  value={customer.zip}
-                  onChange={e => handleCustomerChange("zip", e)}
-                />
-                <Input
-                  placeholder="Città"
-                  value={customer.city}
-                  onChange={e => handleCustomerChange("city", e)}
-                />
-                <Input
-                  placeholder="Provincia"
-                  value={customer.province}
-                  onChange={e => handleCustomerChange("province", e)}
-                />
-              </div>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Dati di spedizione */}
+            <div className="glass-card space-y-4 p-5 md:p-6">
+              <h2 className="text-sm font-semibold text-slate-100">
+                Dati di spedizione
+              </h2>
+              <p className="text-xs text-slate-400">
+                La spedizione verrà aggiunta automaticamente dopo aver inserito
+                tutti i dati obbligatori.
+              </p>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <Input
-                  placeholder="Paese"
-                  value={customer.country}
-                  onChange={e => handleCustomerChange("country", e)}
-                />
+                <div className="md:col-span-2">
+                  <label className="glass-label">Nome completo</label>
+                  <input
+                    name="fullName"
+                    value={customer.fullName}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="Nome e cognome"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Email</label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={customer.email}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="nome@email.com"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Telefono</label>
+                  <input
+                    name="phone"
+                    value={customer.phone}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="+39 ..."
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="glass-label">Indirizzo</label>
+                  <input
+                    name="address1"
+                    value={customer.address1}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="Via, numero civico"
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="glass-label">
+                    Complemento (scala, interno) — opzionale
+                  </label>
+                  <input
+                    name="address2"
+                    value={customer.address2}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="Interno, scala, c/o..."
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Città</label>
+                  <input
+                    name="city"
+                    value={customer.city}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="Città"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">CAP</label>
+                  <input
+                    name="postalCode"
+                    value={customer.postalCode}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="CAP"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Provincia</label>
+                  <input
+                    name="province"
+                    value={customer.province}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="MO"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Paese</label>
+                  <input
+                    name="countryCode"
+                    value={customer.countryCode}
+                    onChange={handleChange}
+                    className="glass-input"
+                    placeholder="IT"
+                    required
+                  />
+                </div>
               </div>
             </div>
 
-            <p className="mt-3 text-[11px] text-gray-500">
-              La spedizione verrà aggiunta automaticamente dopo aver inserito
-              tutti i dati obbligatori.
-            </p>
-          </div>
-
-          {/* ARTICOLI NEL CARRELLO */}
-          <div className="border border-gray-200 rounded-3xl p-5 md:p-6 bg-white shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Articoli nel carrello
+            {/* Pagamento con carta */}
+            <div className="glass-card space-y-4 p-5 md:p-6">
+              <h2 className="text-sm font-semibold text-slate-100">
+                Pagamento con carta
               </h2>
-              <span className="text-xs text-gray-500">
-                ({itemsCount} {itemsCount === 1 ? "articolo" : "articoli"})
-              </span>
+              <p className="text-xs text-slate-400">
+                Tutte le transazioni sono sicure.
+              </p>
+
+              {!clientSecret && (
+                <p className="text-xs text-amber-300/90 bg-amber-900/30 border border-amber-500/30 rounded-xl px-3 py-2">
+                  Inserisci i dati di spedizione: l’importo totale sarà
+                  calcolato e il pagamento verrà inizializzato automaticamente.
+                </p>
+              )}
+
+              {clientSecret && (
+                <div className="border border-white/10 rounded-2xl p-3 bg-slate-900/60">
+                  <PaymentElement
+                    options={{
+                      layout: "tabs",
+                    }}
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="glass-button-primary w-full mt-2"
+                disabled={
+                  loading || !stripe || !elements || !isFormValid()
+                }
+              >
+                {loading
+                  ? "Elaborazione in corso…"
+                  : `Paga ${formatMoney(totalToPayCents, currency)}`}
+              </button>
+
+              {error && (
+                <p className="text-xs text-rose-300 bg-rose-950/50 border border-rose-700/40 rounded-xl px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              {success && (
+                <p className="text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-700/40 rounded-xl px-3 py-2">
+                  Pagamento riuscito. Stiamo creando il tuo ordine su Shopify.
+                </p>
+              )}
             </div>
+          </form>
+        </section>
 
-            <div className="space-y-3">
-              {items.map((item, idx) => {
-                const rawLine = rawCartItems.find(
-                  (r: any) =>
-                    String(r.id) === String(item.id) ||
-                    String(r.variant_id) === String(item.id),
-                )
+        {/* Colonna destra: riepilogo ordine */}
+        <aside className="space-y-4">
+          <div className="glass-card p-5 md:p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-slate-100">
+              Articoli nel carrello
+            </h2>
+            <p className="text-xs text-slate-400">
+              ({cart.items.length} articolo
+              {cart.items.length !== 1 ? "i" : ""})
+            </p>
 
-                const quantity = Number(
-                  rawLine?.quantity ?? item.quantity ?? 1,
-                )
+            <div className="space-y-4">
+              {cart.items.map((item, idx) => {
+                const baseUnit =
+                  typeof item.priceCents === "number"
+                    ? item.priceCents
+                    : item.linePriceCents ?? 0
 
-                const basePriceCents = Number(item.priceCents || 0)
-                const lineTotalCents =
+                const line =
                   typeof item.linePriceCents === "number"
-                    ? Number(item.linePriceCents)
-                    : basePriceCents * quantity
+                    ? item.linePriceCents
+                    : baseUnit * item.quantity
 
-                const unitOriginal = basePriceCents / 100
-                const unitFinal = lineTotalCents / 100 / quantity
-
-                const linePrice = lineTotalCents / 100
-                const unitPrice = unitFinal
-                const saving =
-                  unitOriginal > unitFinal
-                    ? (unitOriginal - unitFinal) * quantity
-                    : 0
+                const fullLine = baseUnit * item.quantity
+                const diff = fullLine - line
+                const hasDiscount = diff > 0
 
                 return (
                   <div
-                    key={idx}
-                    className="flex gap-3 rounded-2xl border border-gray-200 bg-gray-50/70 p-3"
+                    key={`${item.id}-${idx}`}
+                    className="flex gap-3 items-start"
                   >
                     {item.image && (
-                      <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-xl bg-white border border-gray-200">
+                      <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-900/70 border border-white/10 flex-shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={item.image}
                           alt={item.title}
-                          className="h-full w-full object-cover"
+                          className="w-full h-full object-cover"
                         />
                       </div>
                     )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-gray-900 line-clamp-2">
+                    <div className="flex-1 space-y-1">
+                      <p className="text-xs font-medium text-slate-100">
                         {item.title}
-                      </div>
+                      </p>
                       {item.variantTitle && (
-                        <div className="text-[11px] text-gray-500 mt-0.5">
+                        <p className="text-[11px] text-slate-400">
                           {item.variantTitle}
-                        </div>
+                        </p>
                       )}
-                      <div className="mt-1 text-[11px] text-gray-500">
-                        {quantity}× {unitPrice.toFixed(2)} {currency}
-                      </div>
-                      {saving > 0 && (
-                        <div className="mt-0.5 text-[11px] text-emerald-600">
-                          Risparmi {saving.toFixed(2)} {currency}
-                        </div>
-                      )}
-                    </div>
+                      <p className="text-[11px] text-slate-400">
+                        {item.quantity}×{" "}
+                        {formatMoney(baseUnit, currency)}
+                      </p>
 
-                    <div className="flex flex-col items-end justify-center text-sm font-semibold text-gray-900">
-                      {linePrice.toFixed(2)} {currency}
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold">
+                          {formatMoney(line, currency)}
+                        </p>
+                        {hasDiscount && (
+                          <span className="text-[11px] text-emerald-300">
+                            Risparmi {formatMoney(diff, currency)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )
               })}
             </div>
           </div>
-        </section>
 
-        {/* COLONNA DESTRA: riepilogo + pagamento */}
-        <section className="space-y-6 lg:space-y-8">
-          {/* RIEPILOGO ORDINE */}
-          <div className="border border-gray-200 rounded-3xl p-5 md:p-6 bg-white shadow-sm">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-4">
+          <div className="glass-card p-5 md:p-6 space-y-3">
+            <h2 className="text-sm font-semibold text-slate-100">
               Riepilogo ordine
             </h2>
 
-            <dl className="space-y-2 text-sm">
+            <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <dt className="text-gray-600">Subtotale prodotti</dt>
-                <dd>
-                  {subtotalProductsFormatted} {currency}
-                </dd>
+                <span className="text-slate-400">
+                  Subtotale prodotti
+                </span>
+                <span className="text-slate-100">
+                  {formatMoney(subtotalCents, currency)}
+                </span>
               </div>
 
               {discountCents > 0 && (
                 <div className="flex justify-between">
-                  <dt className="text-gray-600">
-                    Sconto
-                    {discountCodeLabel ? ` (${discountCodeLabel})` : ""}
-                  </dt>
-                  <dd className="text-red-600">
-                    −{discountFormatted} {currency}
-                  </dd>
+                  <span className="text-slate-400">Sconto</span>
+                  <span className="text-emerald-300">
+                    −{formatMoney(discountCents, currency)}
+                  </span>
                 </div>
               )}
 
               <div className="flex justify-between">
-                <dt className="text-gray-600">Subtotale</dt>
-                <dd>
-                  {subtotalAfterDiscountFormatted} {currency}
-                </dd>
+                <span className="text-slate-400">Subtotale</span>
+                <span className="text-slate-100">
+                  {formatMoney(
+                    subtotalCents - discountCents,
+                    currency,
+                  )}
+                </span>
               </div>
 
               <div className="flex justify-between">
-                <dt className="text-gray-600">Spedizione</dt>
-                <dd>
+                <span className="text-slate-400">Spedizione</span>
+                <span className="text-slate-100">
                   {shippingCents > 0
-                    ? `${shippingFormatted} ${currency}`
-                    : "Aggiunta dopo l'indirizzo"}
-                </dd>
+                    ? formatMoney(shippingCents, currency)
+                    : "Da calcolare"}
+                </span>
               </div>
-            </dl>
+            </div>
 
             {shippingCents > 0 && (
-              <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="text-xs font-semibold text-gray-800">
-                  Spedizione Standard 24/48h
-                </div>
-                <div className="text-[11px] text-gray-600">
-                  Consegna stimata in 24/48h in tutta Italia.
-                </div>
-              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Spedizione Standard 24/48h
+                <br />
+                Consegna stimata in 24/48h in tutta Italia.
+              </p>
             )}
 
-            <div className="mt-4 border-t border-gray-200 pt-3 flex justify-between items-baseline">
-              <span className="text-sm font-semibold text-gray-900">
-                Totale
-              </span>
-              <span className="text-lg font-semibold text-gray-900">
-                {totalFormatted} {currency}
+            <div className="border-t border-white/10 mt-3 pt-3 flex justify-between items-baseline">
+              <span className="text-xs text-slate-400">Totale</span>
+              <span className="text-lg font-semibold text-slate-50">
+                {formatMoney(totalToPayCents, currency)}
               </span>
             </div>
-          </div>
 
-          {/* PAGAMENTO */}
-          <div className="border border-gray-200 rounded-3xl p-5 md:p-6 bg-white shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Pagamento con carta
-              </h2>
-              <p className="text-[11px] text-gray-500">
-                Tutte le transazioni sono sicure.
-              </p>
-            </div>
-
-            <PaymentBox
-              clientSecret={clientSecret}
-              sessionId={sessionId}
-              customer={customer}
-              totalFormatted={`${totalFormatted} ${currency}`}
-            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Inserisci i dati di spedizione per attivare il pagamento.
+            </p>
           </div>
-        </section>
+        </aside>
       </div>
     </main>
   )
 }
 
-/* ---------------------------------------------
-   BOX PAGAMENTO STRIPE
----------------------------------------------- */
+// ---------- WRAPPER CON FETCH CARRELLO + ELEMENTS ----------
 
-function PaymentBox({
-  clientSecret,
-  sessionId,
-  customer,
-  totalFormatted,
-}: {
-  clientSecret: string | null
-  sessionId: string
-  customer: Customer
-  totalFormatted: string
-}) {
-  if (!clientSecret) {
+function CheckoutPageContent() {
+  const searchParams = useSearchParams()
+  const sessionId = searchParams.get("sessionId") || ""
+
+  const [cart, setCart] = useState<CartSessionResponse | null>(null)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      if (!sessionId) {
+        setError("Sessione non valida: manca il sessionId.")
+        setLoading(false)
+        return
+      }
+
+      try {
+        setLoading(true)
+        setError(null)
+
+        // 1) Recupera sessione carrello
+        const res = await fetch(
+          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
+        )
+        const data: CartSessionResponse & { error?: string } =
+          await res.json()
+
+        if (!res.ok || (data as any).error) {
+          setError(
+            data.error ||
+              "Errore nel recupero del carrello. Riprova dal sito.",
+          )
+          setLoading(false)
+          return
+        }
+
+        setCart(data)
+
+        // 2) Se esiste già un PaymentIntent, riusa il clientSecret
+        if (data.paymentIntentClientSecret) {
+          setClientSecret(data.paymentIntentClientSecret)
+        } else {
+          // crea PaymentIntent con totale già presente in sessione
+          const subtotalCents =
+            typeof data.subtotalCents === "number"
+              ? data.subtotalCents
+              : data.items.reduce((sum, item) => {
+                  const line =
+                    item.linePriceCents ??
+                    item.priceCents ??
+                    0
+                  return sum + line
+                }, 0)
+
+          const shippingCents =
+            typeof data.shippingCents === "number"
+              ? data.shippingCents
+              : 0
+
+          const totalCents =
+            typeof data.totalCents === "number"
+              ? data.totalCents
+              : subtotalCents + shippingCents
+
+          const piRes = await fetch("/api/payment-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              amountCents: totalCents,
+              customer: {},
+            }),
+          })
+
+          const piData = await piRes.json()
+          if (!piRes.ok || !piData.clientSecret) {
+            console.error("Errore payment-intent:", piData)
+            setError(
+              piData?.error ||
+                "Errore nella preparazione del pagamento.",
+            )
+          } else {
+            setClientSecret(piData.clientSecret)
+          }
+        }
+
+        setLoading(false)
+      } catch (err: any) {
+        console.error("Errore checkout:", err)
+        setError(
+          err?.message || "Errore imprevisto nel caricamento del checkout.",
+        )
+        setLoading(false)
+      }
+    }
+
+    load()
+  }, [sessionId])
+
+  if (loading) {
     return (
-      <div className="text-sm text-gray-500">
-        Inserisci i dati di spedizione per attivare il pagamento.
-      </div>
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-sm text-slate-300">
+          Caricamento del checkout in corso…
+        </p>
+      </main>
     )
   }
 
-  const options: any = {
+  if (error || !cart) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-lg font-semibold">
+            Impossibile caricare il checkout
+          </h1>
+          <p className="text-sm text-slate-400">{error}</p>
+          <p className="text-xs text-slate-500">
+            Ritorna al sito e riprova ad aprire il checkout.
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!clientSecret) {
+    // situazione limite: carrello ok ma niente clientSecret
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-lg font-semibold">
+            Errore di inizializzazione del pagamento
+          </h1>
+          <p className="text-sm text-slate-400">
+            Non è stato possibile preparare il pagamento. Riprova fra
+            qualche minuto.
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  const options = {
     clientSecret,
     appearance: {
-      theme: "flat",
-      labels: "floating",
+      theme: "night" as const,
       variables: {
-        colorPrimary: "#000000",
-        colorBackground: "#ffffff",
-        colorText: "#111111",
-        colorDanger: "#df1c41",
-        borderRadius: "10px",
-      },
-      rules: {
-        ".Block": {
-          borderRadius: "12px",
-          border: "1px solid #111111",
-          boxShadow: "none",
-        },
-        ".Input": {
-          borderRadius: "10px",
-          border: "1px solid #111111",
-          padding: "10px 12px",
-          backgroundColor: "#ffffff",
-          boxShadow: "none",
-        },
-        ".Input:focus": {
-          borderColor: "#000000",
-          boxShadow: "0 0 0 1px #000000",
-        },
-        ".Input--invalid": {
-          borderColor: "#df1c41",
-          boxShadow: "0 0 0 1px #df1c41",
-        },
+        colorPrimary: "#22c55e",
       },
     },
   }
 
   return (
     <Elements stripe={stripePromise} options={options}>
-      <PaymentBoxInner
+      <CheckoutInner
+        cart={cart}
         sessionId={sessionId}
-        customer={customer}
-        totalFormatted={totalFormatted}
+        clientSecret={clientSecret}
+        setClientSecret={setClientSecret}
       />
     </Elements>
   )
 }
 
-function PaymentBoxInner({
-  sessionId,
-  customer,
-  totalFormatted,
-}: {
-  sessionId: string
-  customer: Customer
-  totalFormatted: string
-}) {
-  const stripe = useStripe()
-  const elements = useElements()
-
-  const [cardholderName, setCardholderName] = useState("")
-  const [paying, setPaying] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handlePay() {
-    if (!stripe || !elements) return
-
-    setPaying(true)
-    setError(null)
-
-    const fullName =
-      cardholderName.trim() ||
-      `${customer.firstName} ${customer.lastName}`.trim()
-
-    try {
-      const { error, paymentIntent } = (await stripe.confirmPayment({
-        elements,
-        confirmParams: {
-          payment_method_data: {
-            billing_details: {
-              name: fullName || undefined,
-              email: customer.email || undefined,
-              phone: customer.phone || undefined,
-              address: {
-                line1: customer.address1 || undefined,
-                line2: customer.address2 || undefined,
-                postal_code: customer.zip || undefined,
-                city: customer.city || undefined,
-                state: customer.province || undefined,
-                country: customer.country || undefined,
-              },
-            },
-          },
-        },
-        redirect: "if_required",
-      } as any)) as {
-        error: any
-        paymentIntent: { id: string; status: string } | null
-      }
-
-      if (error) {
-        console.error(error)
-        setError(error.message || "Errore durante il pagamento")
-        setPaying(false)
-        return
-      }
-
-      if (paymentIntent && paymentIntent.status === "succeeded") {
-        try {
-          await fetch("/api/shopify/create-order", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId,
-              paymentIntentId: paymentIntent.id,
-              customer,
-            }),
-          })
-        } catch (e) {
-          console.error("Errore creazione ordine Shopify", e)
-        }
-
-        window.location.href = `/thank-you?sessionId=${encodeURIComponent(
-          sessionId,
-        )}&pi=${encodeURIComponent(paymentIntent.id)}`
-      } else {
-        setError("Pagamento non completato. Riprova.")
-        setPaying(false)
-      }
-    } catch (err: any) {
-      console.error(err)
-      setError(
-        err?.message || "Errore imprevisto durante il pagamento",
-      )
-      setPaying(false)
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1.5">
-          Nome completo sull&apos;intestatario della carta
-        </label>
-        <Input
-          placeholder="Es. Mario Rossi"
-          value={cardholderName}
-          onChange={e => setCardholderName(e.target.value)}
-        />
-      </div>
-
-      <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
-        <PaymentElement />
-      </div>
-
-      {error && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      <button
-        onClick={handlePay}
-        disabled={paying || !stripe || !elements}
-        className="w-full inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-gray-900 disabled:opacity-60"
-      >
-        {paying ? "Elaborazione…" : `Paga ora ${totalFormatted}`}
-      </button>
-
-      <p className="text-[11px] text-gray-500">
-        I pagamenti sono elaborati in modo sicuro da Stripe. I dati della carta
-        non passano mai sui nostri server.
-      </p>
-    </div>
-  )
-}
-
-/* ---------------------------------------------
-   EXPORT
----------------------------------------------- */
-
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={<div>Caricamento checkout…</div>}>
-      <CheckoutPageInner />
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+          <p className="text-sm text-slate-300">
+            Caricamento del checkout…
+          </p>
+        </main>
+      }
+    >
+      <CheckoutPageContent />
     </Suspense>
   )
 }
