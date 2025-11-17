@@ -18,7 +18,7 @@ import {
   useElements,
 } from "@stripe/react-stripe-js"
 
-// forziamo render dinamico per evitare prerender statico
+// Forziamo render dinamico (niente prerender statico che rompe useSearchParams)
 export const dynamic = "force-dynamic"
 
 const stripePromise = loadStripe(
@@ -39,9 +39,9 @@ type CartSessionResponse = {
   sessionId: string
   currency: string
   items: CheckoutItem[]
-  subtotalCents?: number
-  shippingCents?: number
-  totalCents?: number
+  subtotalCents?: number       // subtotale prodotti SENZA sconto
+  shippingCents?: number       // eventuale spedizione salvata
+  totalCents?: number          // totale prodotti DOPO sconti (quello che vogliamo usare)
   paymentIntentClientSecret?: string
   discountCodes?: { code: string }[]
   rawCart?: any
@@ -68,6 +68,8 @@ function formatMoney(cents: number | undefined, currency: string = "EUR") {
     minimumFractionDigits: 2,
   }).format(value)
 }
+
+// ------------- COMPONENTE PRINCIPALE DEL CHECKOUT (UI + pagamento) -------------
 
 function CheckoutInner({
   cart,
@@ -99,36 +101,69 @@ function CheckoutInner({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  // ---------- TOTALE / SCONTO / SPEDIZIONE ----------
+  // Spedizione calcolata lato checkout (per ora flat 5,90 quando indirizzo valido)
+  const [shippingCents, setShippingCents] = useState<number>(0)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
-  const subtotalCents = useMemo(() => {
+  // Subtotale lordo (senza sconti)
+  const rawSubtotalCents = useMemo(() => {
     if (typeof cart.subtotalCents === "number") return cart.subtotalCents
-    // fallback: somma delle righe
+    // fallback: somma dei prezzi unitari * quantità
     return cart.items.reduce((sum, item) => {
-      const line = item.linePriceCents ?? item.priceCents ?? 0
-      return sum + line
+      const unit = item.priceCents ?? item.linePriceCents ?? 0
+      return sum + unit * (item.quantity || 1)
     }, 0)
   }, [cart])
 
-  const shippingCents = useMemo(() => {
-    if (typeof cart.shippingCents === "number") return cart.shippingCents
-    return 0
+  // Subtotale netto prodotti DOPO sconti (questo vogliamo usare per il pagamento)
+  const discountedSubtotalCents = useMemo(() => {
+    if (typeof cart.totalCents === "number") return cart.totalCents
+    // se non c'è totalCents, uso come fallback la somma delle linee scontate
+    const sumLines = cart.items.reduce((sum, item) => {
+      const line =
+        typeof item.linePriceCents === "number"
+          ? item.linePriceCents
+          : (item.priceCents ?? 0) * (item.quantity || 1)
+      return sum + line
+    }, 0)
+    return sumLines
   }, [cart])
 
-  const totalFromSession =
-    typeof cart.totalCents === "number"
-      ? cart.totalCents
-      : subtotalCents + shippingCents
-
   const discountCents = useMemo(() => {
-    // sconto = (subtotale + spedizione) - totale effettivo
-    const raw = subtotalCents + shippingCents - totalFromSession
-    return raw > 0 ? raw : 0
-  }, [subtotalCents, shippingCents, totalFromSession])
+    const diff = rawSubtotalCents - discountedSubtotalCents
+    return diff > 0 ? diff : 0
+  }, [rawSubtotalCents, discountedSubtotalCents])
 
-  const totalToPayCents = totalFromSession
+  // Totale da pagare = totale prodotti (doposconto) + spedizione calcolata qui
+  const totalToPayCents = discountedSubtotalCents + (shippingCents || 0)
+
+  // ---------------- CALCOLO SPEDIZIONE (per ora flat 5,90) ----------------
+  // In futuro qui chiamiamo /api/shipping, ora usiamo flat rate quando l'indirizzo è completo
+
+  useEffect(() => {
+    const isAddressValid =
+      customer.address1.trim().length > 3 &&
+      customer.city.trim().length > 1 &&
+      customer.postalCode.trim().length > 2 &&
+      customer.province.trim().length > 1 &&
+      customer.countryCode.trim().length >= 2
+
+    if (!isAddressValid) {
+      setShippingCents(0)
+      return
+    }
+
+    // 🔹 Logica temporanea: spedizione flat 5,90€
+    // (la sostituiamo con /api/shipping quando vuoi)
+    setShippingCents(590)
+  }, [
+    customer.address1,
+    customer.city,
+    customer.postalCode,
+    customer.province,
+    customer.countryCode,
+  ])
 
   // ---------- HANDLER FORM ----------
 
@@ -151,11 +186,18 @@ function CheckoutInner({
     )
   }
 
-  // ---------- CREA PAYMENT INTENT + CONFERMA ----------
+  // ---------- CREA PAYMENT INTENT (SOLO QUANDO SERVE) ----------
 
   async function ensurePaymentIntent(): Promise<string> {
-    // se l'abbiamo già, riusa
+    // se già esiste lo riuso
     if (clientSecret) return clientSecret
+
+    // non ha senso creare PaymentIntent se non abbiamo ancora la spedizione
+    if (!shippingCents) {
+      throw new Error(
+        "Calcolo della spedizione non completato. Attendi un secondo dopo aver inserito l'indirizzo.",
+      )
+    }
 
     const res = await fetch("/api/payment-intent", {
       method: "POST",
@@ -189,6 +231,8 @@ function CheckoutInner({
     return data.clientSecret as string
   }
 
+  // ---------- SUBMIT PAGAMENTO ----------
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -196,6 +240,13 @@ function CheckoutInner({
 
     if (!isFormValid()) {
       setError("Compila tutti i campi obbligatori per procedere al pagamento.")
+      return
+    }
+
+    if (!shippingCents) {
+      setError(
+        "Stiamo calcolando la spedizione. Attendi un secondo e riprova.",
+      )
       return
     }
 
@@ -207,10 +258,10 @@ function CheckoutInner({
     try {
       setLoading(true)
 
-      // 1) Assicura che esista il PaymentIntent con importo corretto
+      // 1) assicura il PaymentIntent con IMPORTO GIUSTO (prodotti scontati + spedizione)
       await ensurePaymentIntent()
 
-      // 2) Conferma il pagamento passando i dati cliente a Stripe
+      // 2) conferma il pagamento passando i dati cliente a Stripe
       const { error: stripeError } = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -241,8 +292,6 @@ function CheckoutInner({
               country: customer.countryCode || "IT",
             },
           },
-          // return_url opzionale se vuoi redirect post-pagamento
-          // return_url: "https://notforresale.it/pages/ordine-completato",
         },
         redirect: "if_required",
       })
@@ -537,7 +586,7 @@ function CheckoutInner({
                   Subtotale prodotti
                 </span>
                 <span className="text-slate-100">
-                  {formatMoney(subtotalCents, currency)}
+                  {formatMoney(rawSubtotalCents, currency)}
                 </span>
               </div>
 
@@ -553,10 +602,7 @@ function CheckoutInner({
               <div className="flex justify-between">
                 <span className="text-slate-400">Subtotale</span>
                 <span className="text-slate-100">
-                  {formatMoney(
-                    subtotalCents - discountCents,
-                    currency,
-                  )}
+                  {formatMoney(discountedSubtotalCents, currency)}
                 </span>
               </div>
 
@@ -636,52 +682,9 @@ function CheckoutPageContent() {
 
         setCart(data)
 
-        // 2) Se esiste già un PaymentIntent, riusa il clientSecret
+        // 2) Se esiste già un PaymentIntent (es. retry), riusa il clientSecret
         if (data.paymentIntentClientSecret) {
           setClientSecret(data.paymentIntentClientSecret)
-        } else {
-          // crea PaymentIntent con totale già presente in sessione
-          const subtotalCents =
-            typeof data.subtotalCents === "number"
-              ? data.subtotalCents
-              : data.items.reduce((sum, item) => {
-                  const line =
-                    item.linePriceCents ??
-                    item.priceCents ??
-                    0
-                  return sum + line
-                }, 0)
-
-          const shippingCents =
-            typeof data.shippingCents === "number"
-              ? data.shippingCents
-              : 0
-
-          const totalCents =
-            typeof data.totalCents === "number"
-              ? data.totalCents
-              : subtotalCents + shippingCents
-
-          const piRes = await fetch("/api/payment-intent", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId,
-              amountCents: totalCents,
-              customer: {},
-            }),
-          })
-
-          const piData = await piRes.json()
-          if (!piRes.ok || !piData.clientSecret) {
-            console.error("Errore payment-intent:", piData)
-            setError(
-              piData?.error ||
-                "Errore nella preparazione del pagamento.",
-            )
-          } else {
-            setClientSecret(piData.clientSecret)
-          }
         }
 
         setLoading(false)
@@ -724,30 +727,31 @@ function CheckoutPageContent() {
   }
 
   if (!clientSecret) {
-    // situazione limite: carrello ok ma niente clientSecret
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-lg font-semibold">
-            Errore di inizializzazione del pagamento
-          </h1>
-          <p className="text-sm text-slate-400">
-            Non è stato possibile preparare il pagamento. Riprova fra
-            qualche minuto.
-          </p>
-        </div>
-      </main>
-    )
+    // Nessun PaymentIntent ancora → lo creeremo al submit (ensurePaymentIntent)
   }
 
-  const options = {
-    clientSecret,
-    appearance: {
-      theme: "night" as const,
-      variables: {
-        colorPrimary: "#22c55e",
-      },
-    },
+  const options = clientSecret
+    ? {
+        clientSecret,
+        appearance: {
+          theme: "night" as const,
+          variables: {
+            colorPrimary: "#22c55e",
+          },
+        },
+      }
+    : undefined
+
+  if (!options) {
+    // Mostra comunque la pagina, ma PaymentElement verrà attivato dopo il primo PaymentIntent
+    return (
+      <CheckoutInner
+        cart={cart}
+        sessionId={sessionId}
+        clientSecret={clientSecret}
+        setClientSecret={setClientSecret}
+      />
+    )
   }
 
   return (
