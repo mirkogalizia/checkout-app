@@ -1,115 +1,59 @@
 // src/app/api/onboarding/save-config/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import { setConfig, AppConfig } from "@/lib/config"
+import { setConfig, AppConfig, StripeAccount, ShopifyConfig } from "@/lib/config"
 
-/**
- * Questa route riceve i dati dalla pagina di onboarding
- * e li salva in Firestore nel documento:
- *
- *   collection: "config"
- *   doc:        "global"
- *
- * usando setConfig(..., { merge: true })
- */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null)
-
-    if (!body) {
-      return NextResponse.json(
-        { ok: false, error: "Body JSON mancante." },
-        { status: 400 },
-      )
-    }
+    const body = await req.json()
 
     const {
       checkoutDomain,
-      shopDomain,
-      adminToken,
-      apiVersion,
       defaultCurrency,
+      shopifyDomain,
+      shopifyAdminToken,
+      shopifyStorefrontToken,
       stripeAccounts,
-    } = body as {
-      checkoutDomain?: string
-      shopDomain?: string
-      adminToken?: string
-      apiVersion?: string
-      defaultCurrency?: string
-      stripeAccounts?: {
-        label?: string
-        secretKey?: string
-        webhookSecret?: string
-      }[]
+    } = body
+
+    // ✅ Shopify config
+    const shopify: ShopifyConfig = {
+      shopDomain: (shopifyDomain || "").trim(),
+      adminToken: (shopifyAdminToken || "").trim(),
+      apiVersion: "2024-10",
+      storefrontToken: (shopifyStorefrontToken || "").trim(),
     }
 
-    // 👇 Minimo sindacale perché le API Shopify funzionino
-    if (!shopDomain || !adminToken) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "shopDomain e adminToken sono obbligatori per collegare Shopify.",
-        },
-        { status: 400 },
-      )
-    }
+    // ✅ Stripe accounts con TUTTI i campi
+    const normalizedStripeAccounts: StripeAccount[] = (stripeAccounts || [])
+      .slice(0, 4)
+      .map((acc: any, idx: number) => ({
+        label: (acc.label || `Account ${idx + 1}`).trim(),
+        secretKey: (acc.secretKey || "").trim(),
+        publishableKey: (acc.publishableKey || "").trim(),    // ✅ AGGIUNTO
+        webhookSecret: (acc.webhookSecret || "").trim(),
+        active: !!acc.active,
+        order: typeof acc.order === "number" ? acc.order : idx,
+        merchantSite: (acc.merchantSite || "").trim(),
+        lastUsedAt: acc.lastUsedAt ?? 0,                      // ✅ AGGIUNTO
+      }))
 
-    // Costruisco l'oggetto parziale da salvare
+    // ✅ Config completa
     const update: Partial<AppConfig> = {
-      ...(checkoutDomain
-        ? {
-            checkoutDomain: checkoutDomain.trim(),
-          }
-        : {}),
-
-      ...(defaultCurrency
-        ? {
-            defaultCurrency: defaultCurrency.toLowerCase(),
-          }
-        : {}),
-
-      shopify: {
-        shopDomain: shopDomain.trim(),
-        adminToken: adminToken.trim(),
-        apiVersion: (apiVersion || "2024-10").trim(),
-      },
-
-      // Se dalla UI invii anche i 4 account Stripe, li segniamo qui
-      ...(stripeAccounts && Array.isArray(stripeAccounts)
-        ? {
-            stripeAccounts: stripeAccounts.map((acc, idx) => ({
-              label: acc.label || `Account ${idx + 1}`,
-              secretKey: acc.secretKey || "",
-              webhookSecret: acc.webhookSecret || "",
-            })),
-          }
-        : {}),
+      checkoutDomain: (checkoutDomain || "").trim(),
+      defaultCurrency: (defaultCurrency || "eur").toLowerCase(),
+      shopify,
+      stripeAccounts: normalizedStripeAccounts,
     }
 
-    // 🔥 Salva in Firestore (merge = non perdi gli altri campi)
     await setConfig(update)
 
-    return NextResponse.json(
-      {
-        ok: true,
-        message: "Configurazione salvata correttamente.",
-        saved: {
-          checkoutDomain: update.checkoutDomain,
-          shopify: update.shopify,
-          defaultCurrency: update.defaultCurrency,
-          stripeAccountsCount: update.stripeAccounts?.length ?? undefined,
-        },
-      },
-      { status: 200 },
-    )
+    console.log("[onboarding/save-config] ✓ Configurazione salvata")
+
+    return NextResponse.json({ success: true })
   } catch (err: any) {
-    console.error("[/api/onboarding/save-config] Errore:", err)
+    console.error("[onboarding/save-config] error:", err)
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          err?.message || "Errore interno durante il salvataggio configurazione.",
-      },
+      { error: err.message || "Errore nel salvataggio config" },
       { status: 500 },
     )
   }
