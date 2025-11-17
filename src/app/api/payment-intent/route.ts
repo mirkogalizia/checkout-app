@@ -40,9 +40,9 @@ export async function POST(req: NextRequest) {
 
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
-    // -------------------------------
-    // 2) Calcolo importo IN BASE A SHOPIFY
-    // -------------------------------
+    // ---------------------------------------------------
+    // 2) Calcolo importo basato sui dati Shopify
+    // ---------------------------------------------------
     const subtotalCents =
       typeof data.subtotalCents === "number"
         ? data.subtotalCents
@@ -58,7 +58,6 @@ export async function POST(req: NextRequest) {
 
     const rawCart = data.rawCart || {}
 
-    // Shopify di solito manda total_price come numero in centesimi
     let totalFromRawCart = 0
     if (typeof rawCart.total_price === "number") {
       totalFromRawCart = rawCart.total_price
@@ -70,9 +69,9 @@ export async function POST(req: NextRequest) {
     }
 
     // PRIORITÀ:
-    // 1) totale calcolato da Shopify (sconti + spedizione)
+    // 1) totale Shopify (sconti + spedizione)
     // 2) totalCents salvato in sessione
-    // 3) subtotal + shipping come fallback
+    // 3) subtotal + shipping
     let amountCents = 0
 
     if (totalFromRawCart > 0) {
@@ -101,9 +100,54 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // -------------------------------
-    // 3) Config Stripe da Firebase
-    // -------------------------------
+    // ---------------------------------------------------
+    // 3) Dati cliente (da Firestore + dal body, se presenti)
+    // ---------------------------------------------------
+    const customerFromDb = (data.customer || {}) as any
+    const customerFromBody = (body?.customer || {}) as any
+
+    // il body (dalla form del checkout) override-a eventuali dati in Firestore
+    const customer = { ...customerFromDb, ...customerFromBody }
+
+    const fullNameRaw =
+      customer.fullName ||
+      `${customer.firstName || ""} ${customer.lastName || ""}`
+
+    const fullName = (fullNameRaw || "").trim()
+    const email = (customer.email || customer.contactEmail || "").trim()
+    const phone = (customer.phone || "").trim()
+
+    // shipping address: usiamo i campi classici della form
+    const address1 =
+      customer.address1 || customer.address || customer.street || ""
+    const address2 = customer.address2 || ""
+    const city = customer.city || ""
+    const postalCode = customer.postalCode || customer.zip || ""
+    const province = customer.province || customer.state || ""
+    const countryCode = customer.countryCode || customer.country || "IT"
+
+    // Prepariamo shipping SOLO se abbiamo almeno un minimo di dati
+    let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined =
+      undefined
+
+    if (fullName || address1 || city || postalCode) {
+      shipping = {
+        name: fullName || " ",
+        phone: phone || undefined,
+        address: {
+          line1: address1 || " ",
+          line2: address2 || undefined,
+          city: city || undefined,
+          postal_code: postalCode || undefined,
+          state: province || undefined,
+          country: countryCode || undefined,
+        },
+      }
+    }
+
+    // ---------------------------------------------------
+    // 4) Config Stripe da Firebase (merchantSite, label, ecc.)
+    // ---------------------------------------------------
     const cfg = await getConfig()
 
     const stripeAccounts = Array.isArray(cfg.stripeAccounts)
@@ -136,31 +180,76 @@ export async function POST(req: NextRequest) {
 
     const stripe = new Stripe(secretKey)
 
-    // -------------------------------
-    // 4) Crea PaymentIntent SOLO CARTA, con metadata utili
-    // -------------------------------
-    const paymentIntent = await stripe.paymentIntents.create({
+    // descrizione ordine (simile a CarShield: "orderId | customer")
+    const firstItemTitle =
+      Array.isArray(data.items) && data.items[0]?.title
+        ? String(data.items[0].title)
+        : ""
+
+    const descriptionParts: string[] = []
+    if (data.orderNumber) {
+      descriptionParts.push(String(data.orderNumber))
+    } else {
+      descriptionParts.push(sessionId)
+    }
+    if (fullName) {
+      descriptionParts.push(fullName)
+    }
+    const description = descriptionParts.join(" | ")
+
+    // ---------------------------------------------------
+    // 5) Crea PaymentIntent SOLO CARTA, con metadata e shipping
+    // ---------------------------------------------------
+    const params: Stripe.PaymentIntentCreateParams = {
       amount: amountCents,
       currency,
       payment_method_types: ["card"],
+
       metadata: {
         sessionId,
         merchant_site: merchantSite,
-        first_item_title:
-          Array.isArray(data.items) && data.items[0]?.title
-            ? String(data.items[0].title)
-            : "",
+        customer_email: email || "",
+        customer_name: fullName || "",
+        first_item_title: firstItemTitle,
       },
-      statement_descriptor_suffix: statementDescriptorSuffix,
-    })
 
-    // -------------------------------
-    // 5) Salva info del PaymentIntent dentro alla sessione carrello
-    // -------------------------------
+      // come CarShield: suffisso tipo "NFR"
+      statement_descriptor_suffix: statementDescriptorSuffix,
+    }
+
+    if (shipping) {
+      params.shipping = shipping
+    }
+
+    if (email) {
+      params.receipt_email = email
+    }
+
+    if (description) {
+      params.description = description
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(params)
+
+    // ---------------------------------------------------
+    // 6) Salva info del PaymentIntent dentro alla sessione carrello
+    // ---------------------------------------------------
     await db.collection(COLLECTION).doc(sessionId).update({
       paymentIntentId: paymentIntent.id,
       paymentIntentClientSecret: paymentIntent.client_secret,
       stripeAccountLabel: firstStripe?.label || null,
+      // utile avere anche una copia dei dati cliente lato server
+      customer: {
+        fullName,
+        email,
+        phone,
+        address1,
+        address2,
+        city,
+        postalCode,
+        province,
+        countryCode,
+      },
     })
 
     return NextResponse.json(
