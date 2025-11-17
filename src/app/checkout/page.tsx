@@ -204,7 +204,6 @@ function CheckoutPageInner() {
     setOriginalSubtotalCents(original)
     setDiscountedSubtotalCents(discounted)
     setDiscountCents(Math.max(0, original - discounted))
-
     // il totale finale verrà ricalcolato nell’effetto spedizione
   }, [items])
 
@@ -245,9 +244,8 @@ function CheckoutPageInner() {
   ---------------------------------------------- */
   useEffect(() => {
     if (!sessionId) return
-    if (!discountedSubtotalCents) return
+    if (!discountedSubtotalCents) return // niente carrello => niente PI
 
-    // possiamo permettere shippingCents = 0 (prima di compilare indirizzo)
     ;(async () => {
       try {
         const res = await fetch("/api/payment-intent", {
@@ -257,6 +255,9 @@ function CheckoutPageInner() {
             sessionId,
             shippingCents,
             customer,
+            // 🔹 passiamo anche gli importi per il backend
+            subtotalCents: discountedSubtotalCents,
+            totalCents,
           }),
         })
         const data = await res.json()
@@ -269,7 +270,7 @@ function CheckoutPageInner() {
         console.error("Errore payment-intent:", err)
       }
     })()
-  }, [sessionId, discountedSubtotalCents, shippingCents, customer])
+  }, [sessionId, discountedSubtotalCents, shippingCents, totalCents, customer])
 
   const itemsCount = useMemo(
     () => items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),

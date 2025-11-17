@@ -1,3 +1,4 @@
+// src/app/api/payment-intent/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getConfig } from "@/lib/config";
@@ -34,6 +35,10 @@ export async function POST(req: NextRequest) {
     const customer = body.customer as Customer | undefined;
     const shippingCentsFromClient = Number(body.shippingCents || 0);
 
+    // nuovi fallback dal client
+    const bodySubtotalCents = Number(body.subtotalCents || 0);
+    const bodyTotalCents = Number(body.totalCents || 0);
+
     if (!sessionId) {
       return NextResponse.json(
         { error: "sessionId mancante nella richiesta." },
@@ -63,34 +68,39 @@ export async function POST(req: NextRequest) {
       apiVersion: "2025-10-29.clover" as any,
     });
 
-    // 2) Recupera sessione carrello da Firestore
+    // 2) Recupera sessione carrello da Firestore (se esiste)
     const ref = db.collection("checkoutSessions").doc(sessionId);
     const snap = await ref.get();
 
-    if (!snap.exists) {
-      return NextResponse.json(
-        { error: "Sessione di checkout non trovata." },
-        { status: 404 },
-      );
-    }
+    const session: CheckoutSessionDoc | {} = snap.exists
+      ? ((snap.data() || {}) as CheckoutSessionDoc)
+      : {};
 
-    const session = snap.data() as CheckoutSessionDoc;
+    const subtotalCents = Number(
+      (session as CheckoutSessionDoc).subtotalCents ?? bodySubtotalCents ?? 0,
+    );
 
-    const subtotalCents = Number(session.subtotalCents || 0);
-    const sessionShippingCents = Number(session.shippingCents || 0);
+    const sessionShippingCents = Number(
+      (session as CheckoutSessionDoc).shippingCents ?? 0,
+    );
 
     // shipping usata nel totale:
-    // priorità: totalCents salvato in sessione (ideale, già con sconti)
-    // fallback: subtotal + shipping
     const shippingCents =
       shippingCentsFromClient > 0
         ? shippingCentsFromClient
         : sessionShippingCents;
 
+    const sessionTotal = Number(
+      (session as CheckoutSessionDoc).totalCents ?? 0,
+    );
+
     const totalCents =
-      typeof session.totalCents === "number" && session.totalCents > 0
-        ? Number(session.totalCents)
-        : subtotalCents + shippingCents;
+      (sessionTotal && sessionTotal > 0
+        ? sessionTotal
+        : 0) ||
+      (bodyTotalCents && bodyTotalCents > 0
+        ? bodyTotalCents
+        : subtotalCents + shippingCents);
 
     if (!totalCents || totalCents <= 0) {
       return NextResponse.json(
@@ -100,9 +110,12 @@ export async function POST(req: NextRequest) {
     }
 
     const currency =
-      (session.currency || cfg.defaultCurrency || "eur").toLowerCase();
+      ((session as CheckoutSessionDoc).currency ||
+        cfg.defaultCurrency ||
+        "eur"
+      ).toLowerCase();
 
-    // 3) Costruisci eventualmente shipping per Stripe (senza far impazzire TS)
+    // 3) Costruisci shipping per Stripe
     let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined;
 
     if (customer) {
@@ -134,11 +147,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 4) Se esiste già un paymentIntent nella sessione, prova a riutilizzarlo
-    if (session.paymentIntentId) {
+    const existingPiId = (session as CheckoutSessionDoc).paymentIntentId;
+
+    if (existingPiId) {
       try {
-        const existing = await stripe.paymentIntents.retrieve(
-          session.paymentIntentId,
-        );
+        const existing = await stripe.paymentIntents.retrieve(existingPiId);
 
         if (
           existing &&
@@ -154,6 +167,7 @@ export async function POST(req: NextRequest) {
             { status: 200 },
           );
         }
+
         // se amount o currency non coincidono, lo aggiorniamo
         if (
           existing &&
@@ -174,6 +188,7 @@ export async function POST(req: NextRequest) {
             {
               paymentIntentId: updated.id,
               paymentIntentClientSecret: updated.client_secret,
+              totalCents,
             },
             { merge: true },
           );
@@ -211,12 +226,13 @@ export async function POST(req: NextRequest) {
 
     const pi = await stripe.paymentIntents.create(createParams);
 
-    // 6) Salva nel documento sessione
+    // 6) Salva (o crea) il documento sessione
     await ref.set(
       {
+        sessionId,
+        totalCents,
         paymentIntentId: pi.id,
         paymentIntentClientSecret: pi.client_secret,
-        totalCents,
       },
       { merge: true },
     );
@@ -232,7 +248,8 @@ export async function POST(req: NextRequest) {
     console.error("[/api/payment-intent] errore:", err);
     return NextResponse.json(
       {
-        error: err?.message || "Errore interno nella creazione del payment intent.",
+        error:
+          err?.message || "Errore interno nella creazione del payment intent.",
       },
       { status: 500 },
     );
