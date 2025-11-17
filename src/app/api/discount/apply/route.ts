@@ -39,7 +39,6 @@ export async function POST(req: NextRequest) {
     const normalizedCode = code.trim()
     const baseUrl = `https://${shopDomain}/admin/api/${apiVersion}`
 
-    // 1) LOOKUP DEL CODICE SCONTO
     const lookupUrl = `${baseUrl}/discount_codes/lookup.json?code=${encodeURIComponent(
       normalizedCode,
     )}`
@@ -50,7 +49,7 @@ export async function POST(req: NextRequest) {
       Accept: "application/json",
     }
 
-    // ⚠️ redirect: "manual" perché Shopify risponde 303 con Location
+    // 🔎 1) LOOKUP CODICE — Shopify risponde 303 con Location
     const lookupRes = await fetch(lookupUrl, {
       method: "GET",
       headers: commonHeaders,
@@ -58,7 +57,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (lookupRes.status === 404) {
-      // codice inesistente
+      // codice inesistente / non attivo
       return NextResponse.json(
         { ok: false, error: "Codice sconto non valido o non attivo." },
         { status: 404 },
@@ -66,13 +65,14 @@ export async function POST(req: NextRequest) {
     }
 
     let discountCode: any = null
+    let priceRuleId: string | number | null = null
 
     if (lookupRes.status === 303) {
-      // Shopify rimanda alla risorsa del discount_code
       const location = lookupRes.headers.get("location")
+
       if (!location) {
         console.error(
-          "[discount lookup] 303 ma senza Location header, response:",
+          "[discount lookup] 303 ma senza Location header, raw:",
           await lookupRes.text().catch(() => ""),
         )
         return NextResponse.json(
@@ -85,9 +85,16 @@ export async function POST(req: NextRequest) {
         )
       }
 
+      // può essere assoluto o relativo
       const followUrl = location.startsWith("http")
         ? location
         : `https://${shopDomain}${location}`
+
+      // Proviamo a estrarre il price_rule_id dall’URL
+      const m = followUrl.match(/price_rules\/(\d+)\/discount_codes\/(\d+)/)
+      if (m) {
+        priceRuleId = m[1]
+      }
 
       const followRes = await fetch(followUrl, {
         method: "GET",
@@ -118,14 +125,20 @@ export async function POST(req: NextRequest) {
 
       discountCode =
         followJson?.discount_code || followJson?.discountCode || null
+
+      // se nel JSON c’è price_rule_id, lo usiamo; altrimenti teniamo quello estratto dall’URL
+      if (discountCode?.price_rule_id) {
+        priceRuleId = discountCode.price_rule_id
+      }
     } else if (lookupRes.ok) {
-      // Caso “vecchio” in cui Shopify risponde direttamente 200 con il discount_code
+      // Scenario “vecchio”: Shopify risponde 200 con il discount_code direttamente
       const lookupJson = await lookupRes.json().catch((e) => {
         console.error("[discount lookup json] error:", e)
         return null
       })
       discountCode =
         lookupJson?.discount_code || lookupJson?.discountCode || null
+      priceRuleId = discountCode?.price_rule_id || null
     } else {
       const txt = await lookupRes.text().catch(() => "")
       console.error(
@@ -142,20 +155,30 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!discountCode?.price_rule_id) {
-      console.error(
-        "[discount lookup] Nessun price_rule_id nel discount_code:",
-        discountCode,
-      )
+    if (!discountCode) {
+      console.error("[discount lookup] Nessun discountCode nel JSON finale.")
       return NextResponse.json(
         { ok: false, error: "Codice sconto non valido o scaduto." },
         { status: 400 },
       )
     }
 
-    const priceRuleId = discountCode.price_rule_id
+    if (!priceRuleId) {
+      console.error(
+        "[discount lookup] Nessun price_rule_id (né in JSON né in URL), discountCode:",
+        discountCode,
+      )
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Impossibile associare una regola di sconto. Controlla la configurazione del codice in Shopify.",
+        },
+        { status: 400 },
+      )
+    }
 
-    // 2) RECUPERA LA PRICE RULE (per capire tipo e valore)
+    // 🔎 2) PRICE RULE → tipo e valore
     const prUrl = `${baseUrl}/price_rules/${priceRuleId}.json`
     const prRes = await fetch(prUrl, {
       method: "GET",
@@ -194,28 +217,28 @@ export async function POST(req: NextRequest) {
       | "percentage"
       | "fixed_amount"
       | "shipping"
-    const rawValue = Number(priceRule.value) // es. "-10.0" per 10%
+    const rawValue = Number(priceRule.value) // es. "-10.0"
     const absValue = Math.abs(rawValue)
 
-    // Per ora supportiamo SOLO percentuali (come avevamo deciso prima)
     if (valueType !== "percentage") {
+      // per adesso supportiamo solo % (come avevamo impostato il frontend)
       return NextResponse.json(
         {
           ok: false,
           error:
-            "Questo codice sconto non è di tipo percentuale. Al momento sono supportati solo sconti in percentuale.",
+            "Questo codice sconto non è di tipo percentuale. Al momento sono supportati solo sconti percentuali.",
         },
         { status: 400 },
       )
     }
 
-    // ✅ TUTTO OK → ritorniamo i dati essenziali al frontend
+    // ✅ TUTTO OK → ritorniamo info semplici al frontend
     return NextResponse.json(
       {
         ok: true,
-        code: discountCode.code,
+        code: discountCode.code || normalizedCode,
         valueType, // "percentage"
-        percentValue: absValue, // es. 10
+        percentValue: absValue, // numero positivo (es. 10)
         priceRuleId,
       },
       { status: 200 },
@@ -226,7 +249,8 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error:
-          err?.message || "Errore interno nell'applicazione del codice sconto.",
+          err?.message ||
+          "Errore interno nell'applicazione del codice sconto.",
       },
       { status: 500 },
     )
