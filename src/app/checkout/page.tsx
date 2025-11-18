@@ -272,13 +272,12 @@ function CheckoutInner({
     setCustomer((prev) => ({ ...prev, [name]: value }))
   }
 
-  // ✅ VALIDAZIONE CON TELEFONO ED EMAIL OBBLIGATORI
   function isFormValid() {
     return (
       customer.fullName.trim().length > 2 &&
       customer.email.trim().includes("@") &&
       customer.email.trim().length > 5 &&
-      customer.phone.trim().length > 8 &&  // ✅ Minimo 9 caratteri
+      customer.phone.trim().length > 8 &&
       customer.address1.trim().length > 3 &&
       customer.city.trim().length > 1 &&
       customer.postalCode.trim().length > 2 &&
@@ -514,28 +513,71 @@ function CheckoutInner({
           border-top: 1px solid #e5e7eb;
         }
 
+        /* ═══════════════════════════════════════════════════════
+           ✅ STILI GOOGLE PLACES AUTOCOMPLETE CUSTOM
+           ═══════════════════════════════════════════════════════ */
         .pac-container {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          border-radius: 4px;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-          border-top: 1px solid #d1d5db;
-          margin-top: 2px;
+          background-color: #ffffff !important;
+          border: 1px solid #000000 !important;
+          border-radius: 8px !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+          margin-top: 4px !important;
+          padding: 8px 0 !important;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
           z-index: 9999 !important;
         }
 
+        .pac-container::after {
+          display: none !important;
+        }
+
         .pac-item {
-          padding: 8px 12px;
-          font-size: 14px;
-          cursor: pointer;
+          padding: 12px 16px !important;
+          cursor: pointer !important;
+          border: none !important;
+          font-size: 14px !important;
+          line-height: 1.5 !important;
+          color: #000000 !important;
+          transition: background-color 0.2s ease !important;
         }
 
         .pac-item:hover {
-          background-color: #f3f4f6;
+          background-color: #f3f4f6 !important;
+        }
+
+        .pac-item-selected {
+          background-color: #000000 !important;
+        }
+
+        .pac-item-selected .pac-item-query,
+        .pac-item-selected .pac-matched {
+          color: #ffffff !important;
+        }
+
+        .pac-icon {
+          background-image: none !important;
+          margin-right: 12px !important;
+          width: 20px !important;
+        }
+
+        .pac-icon::before {
+          content: '📍';
+          font-size: 16px;
         }
 
         .pac-item-query {
-          font-size: 14px;
-          color: #1a1a1a;
+          font-size: 14px !important;
+          font-weight: 600 !important;
+          color: #000000 !important;
+        }
+
+        .pac-matched {
+          font-weight: 700 !important;
+          color: #000000 !important;
+        }
+
+        .pac-logo::after {
+          display: none !important;
         }
 
         @media (max-width: 999px) {
@@ -559,6 +601,18 @@ function CheckoutInner({
         @media (max-width: 768px) {
           .shopify-input {
             font-size: 16px !important;
+          }
+
+          .pac-container {
+            border-radius: 4px !important;
+            left: 0 !important;
+            right: 0 !important;
+            max-width: 100% !important;
+          }
+          
+          .pac-item {
+            padding: 10px 12px !important;
+            font-size: 13px !important;
           }
         }
       `}</style>
@@ -658,7 +712,6 @@ function CheckoutInner({
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Contatti</h2>
                   <div className="space-y-4">
-                    {/* ✅ EMAIL OBBLIGATORIA */}
                     <div>
                       <label className="shopify-label">
                         Email <span className="text-red-600">*</span>
@@ -770,7 +823,6 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* ✅ TELEFONO OBBLIGATORIO */}
                     <div>
                       <label className="shopify-label">
                         Telefono <span className="text-red-600">*</span>
