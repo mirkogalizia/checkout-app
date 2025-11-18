@@ -45,6 +45,7 @@ type CartSessionResponse = {
   paymentIntentClientSecret?: string
   discountCodes?: { code: string }[]
   rawCart?: any
+  shopDomain?: string  // ✅ AGGIUNTO
   error?: string
 }
 
@@ -78,6 +79,14 @@ function CheckoutInner({
 }) {
   const stripe = useStripe()
   const elements = useElements()
+
+  // ✅ URL DINAMICO CARRELLO
+  const cartUrl = useMemo(() => {
+    if (cart.shopDomain) {
+      return `https://${cart.shopDomain}/cart`
+    }
+    return 'https://imjsqk-my.myshopify.com/cart'
+  }, [cart.shopDomain])
 
   const [customer, setCustomer] = useState<CustomerForm>({
     fullName: "",
@@ -513,9 +522,6 @@ function CheckoutInner({
           border-top: 1px solid #e5e7eb;
         }
 
-        /* ═══════════════════════════════════════════════════════
-           ✅ GOOGLE PLACES AUTOCOMPLETE - STILE APPLE/REVOLUT
-           ═══════════════════════════════════════════════════════ */
         .pac-container {
           background-color: #ffffff !important;
           border: 1px solid #e5e7eb !important;
@@ -532,7 +538,6 @@ function CheckoutInner({
           display: none !important;
         }
 
-        /* Singolo elemento */
         .pac-item {
           padding: 12px 14px !important;
           cursor: pointer !important;
@@ -545,13 +550,11 @@ function CheckoutInner({
           margin: 2px 0 !important;
         }
 
-        /* Hover - grigio chiaro minimal */
         .pac-item:hover {
           background-color: #f5f5f7 !important;
           transform: translateX(2px) !important;
         }
 
-        /* Selezionato - grigio più scuro */
         .pac-item-selected,
         .pac-item-selected:hover {
           background-color: #e8e8ed !important;
@@ -562,12 +565,10 @@ function CheckoutInner({
           color: #000000 !important;
         }
 
-        /* Icona minimal */
         .pac-icon {
           display: none !important;
         }
 
-        /* Testo principale */
         .pac-item-query {
           font-size: 14px !important;
           font-weight: 500 !important;
@@ -575,13 +576,11 @@ function CheckoutInner({
           letter-spacing: -0.01em !important;
         }
 
-        /* Testo matched */
         .pac-matched {
           font-weight: 600 !important;
           color: #000000 !important;
         }
 
-        /* Testo secondario (città, paese) */
         span.pac-item-query + span {
           font-size: 12px !important;
           color: #86868b !important;
@@ -589,17 +588,14 @@ function CheckoutInner({
           font-weight: 400 !important;
         }
 
-        /* Separatore tra elementi */
         .pac-item:not(:last-child) {
           border-bottom: none !important;
         }
 
-        /* Logo Google */
         .pac-logo::after {
           display: none !important;
         }
 
-        /* Stile quando è vuoto */
         .pac-container:empty {
           display: none !important;
         }
@@ -647,12 +643,12 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-[#fafafa]">
-        {/* ✅ HEADER CON LOGO CLICCABILE */}
+        {/* ✅ HEADER CON LOGO DINAMICO */}
         <header className="bg-white border-b border-gray-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div className="flex justify-center">
               <a 
-                href="/cart"
+                href={cartUrl}
                 className="transition-opacity hover:opacity-70 cursor-pointer"
                 title="Torna al carrello"
               >
