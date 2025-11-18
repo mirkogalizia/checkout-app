@@ -19,9 +19,6 @@ import {
   useElements,
 } from "@stripe/react-stripe-js"
 
-// ✅ IMPORTA STILE GOOGLE PLACES CUSTOM
-import "./google-places-autocomplete.css"
-
 export const dynamic = "force-dynamic"
 
 const stripePromise = loadStripe(
@@ -275,12 +272,13 @@ function CheckoutInner({
     setCustomer((prev) => ({ ...prev, [name]: value }))
   }
 
+  // ✅ VALIDAZIONE CON TELEFONO ED EMAIL OBBLIGATORI
   function isFormValid() {
     return (
       customer.fullName.trim().length > 2 &&
       customer.email.trim().includes("@") &&
       customer.email.trim().length > 5 &&
-      customer.phone.trim().length > 8 &&
+      customer.phone.trim().length > 8 &&  // ✅ Minimo 9 caratteri
       customer.address1.trim().length > 3 &&
       customer.city.trim().length > 1 &&
       customer.postalCode.trim().length > 2 &&
@@ -516,6 +514,30 @@ function CheckoutInner({
           border-top: 1px solid #e5e7eb;
         }
 
+        .pac-container {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          border-radius: 4px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          border-top: 1px solid #d1d5db;
+          margin-top: 2px;
+          z-index: 9999 !important;
+        }
+
+        .pac-item {
+          padding: 8px 12px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+
+        .pac-item:hover {
+          background-color: #f3f4f6;
+        }
+
+        .pac-item-query {
+          font-size: 14px;
+          color: #1a1a1a;
+        }
+
         @media (max-width: 999px) {
           .mobile-order-summary {
             display: block;
@@ -636,6 +658,7 @@ function CheckoutInner({
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Contatti</h2>
                   <div className="space-y-4">
+                    {/* ✅ EMAIL OBBLIGATORIA */}
                     <div>
                       <label className="shopify-label">
                         Email <span className="text-red-600">*</span>
@@ -747,6 +770,7 @@ function CheckoutInner({
                       </div>
                     </div>
 
+                    {/* ✅ TELEFONO OBBLIGATORIO */}
                     <div>
                       <label className="shopify-label">
                         Telefono <span className="text-red-600">*</span>
