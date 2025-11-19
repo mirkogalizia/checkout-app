@@ -87,6 +87,10 @@ function CheckoutInner({
     return 'https://imjsqk-my.myshopify.com/cart'
   }, [cart.shopDomain])
 
+  const [expressCheckoutReady, setExpressCheckoutReady] = useState(false)
+  const [expressCheckoutError, setExpressCheckoutError] = useState<string | null>(null)
+  const expressCheckoutRef = useRef<any>(null)
+
   const [customer, setCustomer] = useState<CustomerForm>({
     fullName: "",
     email: "",
@@ -129,7 +133,9 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  const totalToPayCents = subtotalCents - discountCents + calculatedShippingCents
+  const totalToPayCents = subtotalCents - discountCents + 590
+
+  
 
   // GOOGLE MAPS AUTOCOMPLETE
   useEffect(() => {
@@ -452,13 +458,13 @@ function CheckoutInner({
 
         .shopify-input {
           width: 100%;
-          padding: 11px 12px;
+          padding: 11px 14px;
           font-size: 14px;
-          line-height: 1.4;
+          line-height: 1.5;
           color: #1a1a1a;
           background: #fff;
           border: 1px solid #d1d5db;
-          border-radius: 4px;
+          border-radius: 8px;
           transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
@@ -484,7 +490,7 @@ function CheckoutInner({
           color: #fff;
           background: #005bd3;
           border: none;
-          border-radius: 4px;
+          border-radius: 8px;
           cursor: pointer;
           transition: background 0.2s ease;
         }
@@ -501,7 +507,7 @@ function CheckoutInner({
         .shopify-card {
           background: #fff;
           border: 1px solid #e5e7eb;
-          border-radius: 8px;
+          border-radius: 12px;
           padding: 20px;
           margin-bottom: 16px;
         }
@@ -519,6 +525,36 @@ function CheckoutInner({
           margin-top: 12px;
           padding-top: 12px;
           border-top: 1px solid #e5e7eb;
+        }
+
+        #express-checkout-element {
+          min-height: 50px;
+        }
+
+        .express-divider {
+          position: relative;
+          text-align: center;
+          margin: 24px 0;
+        }
+
+        .express-divider::before {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 0;
+          right: 0;
+          height: 1px;
+          background: #e5e7eb;
+        }
+
+        .express-divider span {
+          position: relative;
+          display: inline-block;
+          padding: 0 16px;
+          background: #fff;
+          color: #6b7280;
+          font-size: 14px;
+          font-weight: 500;
         }
 
         .pac-container {
@@ -685,11 +721,11 @@ function CheckoutInner({
                 return (
                   <div key={`${item.id}-${idx}`} className="flex gap-3">
                     {item.image && (
-                      <div className="relative w-16 h-16 rounded border border-gray-200 flex-shrink-0">
+                      <div className="relative w-16 h-16 rounded-lg border border-gray-200 flex-shrink-0 overflow-hidden">
                         <img
                           src={item.image}
                           alt={item.title}
-                          className="w-full h-full object-cover rounded"
+                          className="w-full h-full object-cover"
                         />
                         <span className="absolute -top-2 -right-2 bg-gray-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
                           {item.quantity}
@@ -734,6 +770,25 @@ function CheckoutInner({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
             <div className="order-2 lg:order-1">
+              
+              {/* EXPRESS CHECKOUT */}
+              <div className="shopify-card mb-6">
+                <h2 className="text-lg font-semibold mb-4">Checkout Rapido</h2>
+                
+                <div id="express-checkout-element"></div>
+
+                {expressCheckoutError && (
+                  <p className="text-sm text-red-600 mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
+                    {expressCheckoutError}
+                  </p>
+                )}
+
+                <div className="express-divider">
+                  <span>oppure</span>
+                </div>
+              </div>
+
+              {/* FORM TRADIZIONALE */}
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Contatti</h2>
@@ -873,7 +928,7 @@ function CheckoutInner({
                 {calculatedShippingCents > 0 && (
                   <div className="shopify-card">
                     <h2 className="text-lg font-semibold mb-4">Metodo di spedizione</h2>
-                    <div className="flex items-center justify-between p-3 border border-gray-300 rounded bg-gray-50">
+                    <div className="flex items-center justify-between p-3 border border-gray-300 rounded-lg bg-gray-50">
                       <span className="text-sm font-medium">BRT Express 24h</span>
                       <span className="text-sm font-semibold">€5,90</span>
                     </div>
@@ -923,13 +978,13 @@ function CheckoutInner({
                   </button>
 
                   {error && (
-                    <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3">
+                    <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
                       {error}
                     </p>
                   )}
 
                   {success && (
-                    <div className="mt-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded p-3">
+                    <div className="mt-4 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg p-3">
                       <div className="flex items-center gap-2 mb-2">
                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -961,11 +1016,11 @@ function CheckoutInner({
                     return (
                       <div key={`${item.id}-${idx}`} className="flex gap-4">
                         {item.image && (
-                          <div className="relative w-16 h-16 rounded border border-gray-200 flex-shrink-0">
+                          <div className="relative w-16 h-16 rounded-lg border border-gray-200 flex-shrink-0 overflow-hidden">
                             <img
                               src={item.image}
                               alt={item.title}
-                              className="w-full h-full object-cover rounded"
+                              className="w-full h-full object-cover"
                             />
                             <span className="absolute -top-2 -right-2 bg-gray-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
                               {item.quantity}
@@ -1096,7 +1151,7 @@ function CheckoutPageContent() {
         colorBackground: "#ffffff",
         colorText: "#1a1a1a",
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        borderRadius: "4px",
+        borderRadius: "8px",
       },
     },
   }
