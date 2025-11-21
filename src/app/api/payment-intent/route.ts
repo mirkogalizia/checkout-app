@@ -68,19 +68,67 @@ export async function POST(req: NextRequest) {
     const province = customerBody.province || ""
     const countryCode = (customerBody.countryCode || "IT").toUpperCase()
 
-    // ✅ ROTAZIONE STRIPE: Ottieni account attivo
-    const activeAccount = await getActiveStripeAccount()
+    // ✅ LOGICA FISSA ACCOUNT PER SESSIONE
+    let activeAccount: any
+    let shouldCreateNewPI = false
+
+    // Se esiste già un account salvato per questa sessione, USALO
+    if (data.sessionStripeAccountLabel && data.sessionStripeAccountSecretKey) {
+      console.log(`[payment-intent] ♻️ Riuso account sessione: ${data.sessionStripeAccountLabel}`)
+      
+      activeAccount = {
+        label: data.sessionStripeAccountLabel,
+        secretKey: data.sessionStripeAccountSecretKey,
+        publishableKey: data.sessionStripeAccountPublishableKey,
+        merchantSite: data.sessionMerchantSite || 'https://nfrcheckout.com',
+        productTitle1: data.sessionProductTitle1 || '',
+        productTitle2: data.sessionProductTitle2 || '',
+        productTitle3: data.sessionProductTitle3 || '',
+        productTitle4: data.sessionProductTitle4 || '',
+        productTitle5: data.sessionProductTitle5 || '',
+        productTitle6: data.sessionProductTitle6 || '',
+        productTitle7: data.sessionProductTitle7 || '',
+        productTitle8: data.sessionProductTitle8 || '',
+        productTitle9: data.sessionProductTitle9 || '',
+        productTitle10: data.sessionProductTitle10 || '',
+        order: data.sessionStripeAccountOrder || 0,
+      }
+    } else {
+      // Prima volta: determina account attivo e SALVALO per tutta la sessione
+      console.log('[payment-intent] 🆕 Prima richiesta, determino account attivo')
+      activeAccount = await getActiveStripeAccount()
+      
+      // ✅ SALVA account per questa sessione
+      await db.collection(COLLECTION).doc(sessionId).update({
+        sessionStripeAccountLabel: activeAccount.label,
+        sessionStripeAccountSecretKey: activeAccount.secretKey,
+        sessionStripeAccountPublishableKey: activeAccount.publishableKey,
+        sessionStripeAccountOrder: activeAccount.order || 0,
+        sessionMerchantSite: activeAccount.merchantSite || '',
+        sessionProductTitle1: activeAccount.productTitle1 || '',
+        sessionProductTitle2: activeAccount.productTitle2 || '',
+        sessionProductTitle3: activeAccount.productTitle3 || '',
+        sessionProductTitle4: activeAccount.productTitle4 || '',
+        sessionProductTitle5: activeAccount.productTitle5 || '',
+        sessionProductTitle6: activeAccount.productTitle6 || '',
+        sessionProductTitle7: activeAccount.productTitle7 || '',
+        sessionProductTitle8: activeAccount.productTitle8 || '',
+        sessionProductTitle9: activeAccount.productTitle9 || '',
+        sessionProductTitle10: activeAccount.productTitle10 || '',
+        sessionCreatedAt: new Date().toISOString(),
+      })
+      
+      console.log(`[payment-intent] ✅ Account fissato per sessione: ${activeAccount.label}`)
+    }
 
     const secretKey = activeAccount.secretKey
-    const merchantSite = activeAccount.merchantSite || 
-                         (await getConfig()).checkoutDomain || 
-                         "https://notforresale.it"
+    const merchantSite = activeAccount.merchantSite || 'https://nfrcheckout.com'
 
     const descriptorRaw = activeAccount.label || "NFR"
     const statementDescriptorSuffix =
       descriptorRaw.replace(/[^A-Za-z0-9 ]/g, "").slice(0, 22) || "NFR"
 
-    // ✅ NUOVO: Estrai product titles e scegli uno random
+    // Product title random
     const productTitles: string[] = []
     for (let i = 1; i <= 10; i++) {
       const key = `productTitle${i}` as keyof typeof activeAccount
@@ -93,21 +141,37 @@ export async function POST(req: NextRequest) {
       ? productTitles[Math.floor(Math.random() * productTitles.length)]
       : 'NFR Product'
 
-    console.log(`[payment-intent] 🔄 Account attivo: ${activeAccount.label}`)
-    console.log(`[payment-intent] 🎲 Product title random: ${randomProductTitle}`)
+    console.log(`[payment-intent] 🔄 Account: ${activeAccount.label}`)
+    console.log(`[payment-intent] 🎲 Product title: ${randomProductTitle}`)
     console.log(`[payment-intent] 💰 Amount: €${(amountCents / 100).toFixed(2)}`)
 
-    // Inizializza Stripe con l'account rotato
+    // Inizializza Stripe con l'account fisso
     const stripe = new Stripe(secretKey, {
       apiVersion: "2025-10-29.clover",
     })
+
+    // ✅ VERIFICA SE IL PI ESISTE ANCORA
+    if (existingPaymentIntentId) {
+      try {
+        await stripe.paymentIntents.retrieve(existingPaymentIntentId)
+        console.log(`[payment-intent] ✓ PaymentIntent esistente trovato: ${existingPaymentIntentId}`)
+      } catch (err: any) {
+        console.log(`[payment-intent] ⚠️ PI non trovato su questo account, ne creo uno nuovo`)
+        shouldCreateNewPI = true
+        
+        // Rimuovi il vecchio PI ID
+        await db.collection(COLLECTION).doc(sessionId).update({
+          paymentIntentId: null,
+          paymentIntentClientSecret: null,
+        })
+      }
+    }
 
     // ✅ CREA O OTTIENI CUSTOMER STRIPE
     let stripeCustomerId = data.stripeCustomerId as string | undefined
 
     if (!stripeCustomerId && email) {
       try {
-        // Cerca se esiste già un customer con questa email
         const existingCustomers = await stripe.customers.list({
           email: email,
           limit: 1,
@@ -115,9 +179,8 @@ export async function POST(req: NextRequest) {
 
         if (existingCustomers.data.length > 0) {
           stripeCustomerId = existingCustomers.data[0].id
-          console.log(`[payment-intent] ✓ Customer esistente trovato: ${stripeCustomerId}`)
+          console.log(`[payment-intent] ✓ Customer esistente: ${stripeCustomerId}`)
         } else {
-          // Crea nuovo customer
           const customer = await stripe.customers.create({
             email: email,
             name: fullName || undefined,
@@ -138,24 +201,20 @@ export async function POST(req: NextRequest) {
           })
 
           stripeCustomerId = customer.id
-          console.log(`[payment-intent] ✓ Nuovo customer creato: ${stripeCustomerId}`)
+          console.log(`[payment-intent] ✓ Nuovo customer: ${stripeCustomerId}`)
 
-          // Salva customer ID in Firestore
           await db.collection(COLLECTION).doc(sessionId).update({
             stripeCustomerId,
           })
         }
       } catch (customerError: any) {
-        console.error("[payment-intent] Errore creazione customer:", customerError)
-        // Continua senza customer ID
+        console.error("[payment-intent] Errore customer:", customerError)
       }
     }
 
-    // ✅ DESCRIPTION: "orderNumber | customer name"
     const orderNumber = data.orderNumber || sessionId
     const description = `${orderNumber} | ${fullName || "Guest"}`
 
-    // ✅ SHIPPING OBJECT COMPLETO
     let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined
 
     if (fullName && address1 && city && postalCode) {
@@ -175,11 +234,9 @@ export async function POST(req: NextRequest) {
 
     let paymentIntent: Stripe.PaymentIntent
 
-    if (existingPaymentIntentId) {
+    if (existingPaymentIntentId && !shouldCreateNewPI) {
       // ✅ AGGIORNA PaymentIntent esistente
-      console.log(
-        `[payment-intent] Aggiornamento PI ${existingPaymentIntentId} con amount ${amountCents} (€${(amountCents / 100).toFixed(2)})`
-      )
+      console.log(`[payment-intent] Aggiornamento PI ${existingPaymentIntentId}`)
 
       const updateParams: Stripe.PaymentIntentUpdateParams = {
         amount: amountCents,
@@ -193,7 +250,7 @@ export async function POST(req: NextRequest) {
           customer_email: email || "",
           customer_name: fullName || "",
           order_id: orderNumber,
-          first_item_title: randomProductTitle, // ✅ Product title random
+          first_item_title: randomProductTitle,
           stripe_account: activeAccount.label,
           stripe_account_order: String(activeAccount.order || 0),
         },
@@ -204,14 +261,10 @@ export async function POST(req: NextRequest) {
         updateParams
       )
 
-      console.log(
-        `[payment-intent] ✅ PaymentIntent aggiornato: ${paymentIntent.id} = €${(paymentIntent.amount / 100).toFixed(2)}`
-      )
+      console.log(`[payment-intent] ✅ PI aggiornato: ${paymentIntent.id}`)
     } else {
       // ✅ CREA nuovo PaymentIntent
-      console.log(
-        `[payment-intent] Creazione nuovo PI con amount ${amountCents} (€${(amountCents / 100).toFixed(2)})`
-      )
+      console.log(`[payment-intent] Creazione nuovo PI`)
 
       const params: Stripe.PaymentIntentCreateParams = {
         amount: amountCents,
@@ -221,23 +274,20 @@ export async function POST(req: NextRequest) {
         receipt_email: email || undefined,
         statement_descriptor_suffix: statementDescriptorSuffix,
         
-        // ✅ AUTOMATIC PAYMENT METHODS
         automatic_payment_methods: {
           enabled: true,
           allow_redirects: "always",
         },
 
-        // ✅ SHIPPING
         shipping: shipping,
 
-        // ✅ METADATA COMPLETO con product title random
         metadata: {
           session_id: sessionId,
           merchant_site: merchantSite,
           customer_email: email || "",
           customer_name: fullName || "",
           order_id: orderNumber,
-          first_item_title: randomProductTitle, // ✅ Product title random
+          first_item_title: randomProductTitle,
           stripe_account: activeAccount.label,
           stripe_account_order: String(activeAccount.order || 0),
           rotation_timestamp: new Date().toISOString(),
@@ -246,22 +296,14 @@ export async function POST(req: NextRequest) {
 
       paymentIntent = await stripe.paymentIntents.create(params)
 
-      console.log(
-        `[payment-intent] ✅ PaymentIntent creato: ${paymentIntent.id} = €${(paymentIntent.amount / 100).toFixed(2)}`
-      )
-      console.log(`[payment-intent] 🏷️ Account usato: ${activeAccount.label}`)
+      console.log(`[payment-intent] ✅ PI creato: ${paymentIntent.id}`)
 
-      // Salva PaymentIntent ID e account info in Firestore
       await db.collection(COLLECTION).doc(sessionId).update({
         paymentIntentId: paymentIntent.id,
         paymentIntentClientSecret: paymentIntent.client_secret,
-        stripeAccountLabel: activeAccount.label,
-        stripeAccountOrder: activeAccount.order || 0,
-        lastRotationAt: new Date().toISOString(),
       })
     }
 
-    // Salva dati cliente aggiornati
     await db.collection(COLLECTION).doc(sessionId).update({
       customer: {
         fullName,
