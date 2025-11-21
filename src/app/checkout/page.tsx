@@ -357,6 +357,7 @@ function CheckoutInner({
       const { error: stripeError } = await stripe.confirmPayment({
         elements,
         confirmParams: {
+          return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
           payment_method_data: {
             billing_details: {
               name: customer.fullName,
@@ -954,7 +955,6 @@ function CheckoutPageContent() {
     )
   }
 
-  // ✅ Inizializza Elements con mode, amount e currency
   const options = {
     mode: 'payment' as const,
     amount: 1000,
