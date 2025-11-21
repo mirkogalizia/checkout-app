@@ -83,10 +83,6 @@ function CheckoutInner({
     return 'https://imjsqk-my.myshopify.com/cart'
   }, [cart.shopDomain])
 
-  const [expressCheckoutReady, setExpressCheckoutReady] = useState<boolean | null>(null)
-  const [expressCheckoutError, setExpressCheckoutError] = useState<string | null>(null)
-  const expressCheckoutRef = useRef<any>(null)
-
   const [customer, setCustomer] = useState<CustomerForm>({
     fullName: "",
     email: "",
@@ -130,83 +126,6 @@ function CheckoutInner({
   }, [subtotalCents, cart.totalCents])
 
   const totalToPayCents = subtotalCents - discountCents + 590
-
-  // EXPRESS CHECKOUT - DISABILITATO TEMPORANEAMENTE
-  /*
-  useEffect(() => {
-    async function initExpressCheckout() {
-      if (!stripe || expressCheckoutRef.current) return
-
-      try {
-        const res = await fetch('/api/create-checkout-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            sessionId,
-            cartData: cart 
-          })
-        })
-
-        if (!res.ok) {
-          const errorText = await res.text()
-          console.error('[Express] API Error:', errorText)
-          setExpressCheckoutReady(false)
-          return
-        }
-
-        const data = await res.json()
-
-        if (!data.clientSecret) {
-          console.error('[Express] Missing clientSecret')
-          setExpressCheckoutReady(false)
-          return
-        }
-
-        const checkout = await stripe.initCheckout({ 
-          clientSecret: data.clientSecret 
-        })
-
-        const expressElement = checkout.createExpressCheckoutElement()
-
-        expressElement.on('ready', (event: any) => {
-          if (!event.availablePaymentMethods || event.availablePaymentMethods.length === 0) {
-            setExpressCheckoutReady(false)
-            if (expressCheckoutRef.current) {
-              expressCheckoutRef.current.unmount()
-              expressCheckoutRef.current = null
-            }
-          } else {
-            setExpressCheckoutReady(true)
-          }
-        })
-
-        expressElement.mount('#express-checkout-element')
-        expressCheckoutRef.current = expressElement
-
-        const loadActionsResult = await checkout.loadActions()
-        
-        if (loadActionsResult.type === 'success') {
-          expressElement.on('confirm', async (event) => {
-            const result = await loadActionsResult.actions.confirm({
-              expressCheckoutConfirmEvent: event
-            })
-
-            if (result.type === 'success') {
-              window.location.href = `/checkout-return?session_id=${data.checkoutSessionId}`
-            } else {
-              setExpressCheckoutError('Pagamento non riuscito')
-            }
-          })
-        }
-      } catch (err: any) {
-        console.error('[Express Checkout Error]:', err)
-        setExpressCheckoutReady(false)
-      }
-    }
-
-    initExpressCheckout()
-  }, [stripe, sessionId, cart])
-  */
 
   useEffect(() => {
     let mounted = true
@@ -386,7 +305,7 @@ function CheckoutInner({
           throw new Error(piData.error || "Errore creazione pagamento")
         }
 
-        console.log('[Checkout] ✅ ClientSecret ricevuto')
+        console.log('[Checkout] ✅ ClientSecret ricevuto:', piData.clientSecret.substring(0, 30))
         setClientSecret(piData.clientSecret)
         setIsCalculatingShipping(false)
       } catch (err: any) {
@@ -704,21 +623,6 @@ function CheckoutInner({
             
             <div className="lg:pr-8">
               <form onSubmit={handleSubmit} className="space-y-6">
-                
-                {/* EXPRESS CHECKOUT DISABILITATO
-                {expressCheckoutReady === true && (
-                  <div className="shopify-card">
-                    <h2 className="text-base font-semibold mb-4">Pagamento rapido</h2>
-                    <div id="express-checkout-element"></div>
-                    {expressCheckoutError && (
-                      <p className="text-sm text-red-600 mt-2">{expressCheckoutError}</p>
-                    )}
-                    <div className="express-divider">
-                      <span>oppure paga con carta</span>
-                    </div>
-                  </div>
-                )}
-                */}
 
                 <div className="shopify-card">
                   <h2 className="text-base font-semibold mb-4">Informazioni di contatto</h2>
@@ -860,7 +764,7 @@ function CheckoutInner({
                     <p className="text-sm text-red-600 mb-4">{shippingError}</p>
                   )}
 
-                  {clientSecret && !isCalculatingShipping && (
+                  {clientSecret && !isCalculatingShipping && stripe && elements && (
                     <div className="mt-4">
                       <PaymentElement />
                     </div>
@@ -964,6 +868,7 @@ function CheckoutPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -992,7 +897,7 @@ function CheckoutPageContent() {
 
         setCart(data)
 
-        // ✅ CARICA PUBLISHABLE KEY DINAMICA SENZA FALLBACK
+        // ✅ CARICA PUBLISHABLE KEY DINAMICA
         try {
           const pkRes = await fetch('/api/stripe-status')
           
@@ -1051,8 +956,8 @@ function CheckoutPageContent() {
     )
   }
 
+  // ✅ Options senza clientSecret - verrà gestito internamente da CheckoutInner
   const options = {
-    clientSecret: cart.paymentIntentClientSecret || undefined,
     appearance: {
       theme: "stripe" as const,
       variables: {
