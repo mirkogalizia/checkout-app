@@ -903,7 +903,18 @@ function CheckoutInner({
 
                   {clientSecret && !isCalculatingShipping && (
                     <div className="border border-gray-300 rounded-md p-4 bg-white">
-                      <PaymentElement />
+                      <PaymentElement 
+                        options={{
+                          fields: {
+                            billingDetails: {
+                              name: 'auto',
+                              email: 'never',
+                              phone: 'never',
+                              address: 'never'
+                            }
+                          }
+                        }}
+                      />
                     </div>
                   )}
 
