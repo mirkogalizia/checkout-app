@@ -5,10 +5,15 @@ import { getConfig } from "@/lib/config"
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { cartId } = body
+    let { cartId } = body
 
     if (!cartId) {
       return NextResponse.json({ error: "cartId mancante" }, { status: 400 })
+    }
+
+    // ✅ Se cartId non include 'gid://', costruiscilo
+    if (!cartId.includes('gid://')) {
+      cartId = `gid://shopify/Cart/${cartId}`
     }
 
     console.log(`[clear-cart] 🧹 Svuotamento carrello Shopify: ${cartId}`)

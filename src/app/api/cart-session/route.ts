@@ -15,6 +15,7 @@ type ShopifyCartItem = {
   line_price?: number
   image?: string
   variant_title?: string
+  token?: string
 }
 
 type ShopifyCart = {
@@ -22,6 +23,7 @@ type ShopifyCart = {
   items_subtotal_price?: number
   total_price?: number
   currency?: string
+  token?: string
 }
 
 type CheckoutItem = {
@@ -146,6 +148,9 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    // ✅ Costruisci cartId da token
+    const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
+
     const docData = {
       sessionId,
       createdAt: new Date().toISOString(),
@@ -156,7 +161,10 @@ export async function POST(req: NextRequest) {
       totalCents,
       paymentIntentId: paymentIntent.id,
       paymentIntentClientSecret: paymentIntent.client_secret,
-      rawCart: cart,
+      rawCart: {
+        ...cart,
+        id: cartId  // ✅ Aggiungi id costruito
+      },
     }
 
     await db.collection(COLLECTION).doc(sessionId).set(docData)
