@@ -5,7 +5,7 @@ import { db } from '@/lib/firebaseAdmin'
 
 export async function GET(req: NextRequest) {
   try {
-    // Autenticazione semplice
+    // Verifica password
     const authHeader = req.headers.get('authorization')
     if (authHeader !== `Bearer ${process.env.ADMIN_SECRET_KEY}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
