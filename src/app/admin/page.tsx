@@ -152,6 +152,7 @@ export default function AdminDashboard() {
               value={secretKey}
               onChange={(e) => setSecretKey(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              autoComplete="current-password"
               required
             />
 
@@ -245,7 +246,7 @@ export default function AdminDashboard() {
               </div>
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                 <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2 a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
             </div>
@@ -300,67 +301,80 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredTransactions.map((tx) => {
-                  const success = isSuccess(tx)
-                  const failed = isFailed(tx)
-                  
-                  return (
-                    <tr 
-                      key={tx.id} 
-                      className={`hover:bg-gray-50 transition ${
-                        success ? 'bg-green-50' : failed ? 'bg-red-50' : ''
-                      }`}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{formatDate(tx.created)}</div>
-                        {tx.orderNumber && (
-                          <div className="text-xs text-gray-500">Ordine #{tx.orderNumber}</div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900">{tx.fullName}</div>
-                        <div className="text-xs text-gray-500">{tx.email}</div>
-                        {failed && (
-                          <div className="mt-1 inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
-                            🚫 {getErrorLabel(tx.errorCode, tx.declineCode)}
+                {filteredTransactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center">
+                      <div className="text-gray-400">
+                        <svg className="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                        </svg>
+                        <p className="text-sm">Nessuna transazione trovata</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTransactions.map((tx) => {
+                    const success = isSuccess(tx)
+                    const failed = isFailed(tx)
+                    
+                    return (
+                      <tr 
+                        key={tx.id} 
+                        className={`hover:bg-gray-50 transition ${
+                          success ? 'bg-green-50' : failed ? 'bg-red-50' : ''
+                        }`}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{formatDate(tx.created)}</div>
+                          {tx.orderNumber && (
+                            <div className="text-xs text-gray-500">Ordine #{tx.orderNumber}</div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm font-medium text-gray-900">{tx.fullName}</div>
+                          <div className="text-xs text-gray-500">{tx.email}</div>
+                          {failed && (
+                            <div className="mt-1 inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
+                              🚫 {getErrorLabel(tx.errorCode, tx.declineCode)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-bold text-gray-900">
+                            {formatMoney(tx.amount, tx.currency)}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-bold text-gray-900">
-                          {formatMoney(tx.amount, tx.currency)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {success && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                            ✓ Completato
-                          </span>
-                        )}
-                        {failed && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                            ✗ Fallito
-                          </span>
-                        )}
-                        {!success && !failed && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                            ⏳ In sospeso
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <a
-                          href={`https://dashboard.stripe.com/payments/${tx.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          Vedi su Stripe →
-                        </a>
-                      </td>
-                    </tr>
-                  )
-                })}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {success && (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                              ✓ Completato
+                            </span>
+                          )}
+                          {failed && (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                              ✗ Fallito
+                            </span>
+                          )}
+                          {!success && !failed && (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                              ⏳ In sospeso
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <a
+                            href={`https://dashboard.stripe.com/payments/${tx.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            Vedi su Stripe →
+                          </a>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
               </tbody>
             </table>
           </div>
