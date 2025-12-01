@@ -445,28 +445,44 @@ function CheckoutInner({
       const finalBillingAddress = useDifferentBilling ? billingAddress : customer
 
       const { error: stripeError } = await stripe.confirmPayment({
-        elements,
-        clientSecret: clientSecret,
-        confirmParams: {
-          return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
-          payment_method_data: {
-            billing_details: {
-              // name preso dal PaymentElement automaticamente
-              email: customer.email,
-              phone: finalBillingAddress.phone || customer.phone || undefined,
-              address: {
-                line1: finalBillingAddress.address1,
-                line2: finalBillingAddress.address2 || undefined,
-                city: finalBillingAddress.city,
-                postal_code: finalBillingAddress.postalCode,
-                state: finalBillingAddress.province,
-                country: finalBillingAddress.countryCode || "IT",
-              },
-            },
-          },
+  elements,
+  clientSecret,
+
+  confirmParams: {
+    return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
+
+    payment_method_data: {
+      billing_details: {
+        name: finalBillingAddress.fullName || customer.fullName,
+        email: customer.email,
+        phone: finalBillingAddress.phone || customer.phone,
+
+        address: {
+          line1: finalBillingAddress.address1,
+          line2: finalBillingAddress.address2 || undefined,
+          city: finalBillingAddress.city,
+          postal_code: finalBillingAddress.postalCode,
+          state: finalBillingAddress.province,
+          country: finalBillingAddress.countryCode || "IT",
         },
-        redirect: "if_required",
-      })
+      },
+
+      // 🔥 ANTIFRODE RADAR EXTRA
+      metadata: {
+        session_id: sessionId,
+        customer_fullName: customer.fullName,
+        customer_email: customer.email,
+        shipping_city: customer.city,
+        shipping_postal: customer.postalCode,
+        shipping_country: customer.countryCode,
+        checkout_type: "custom",
+      },
+    },
+  },
+
+  // 🔥 Obbliga 3DS se necessario
+  redirect: "if_required",
+})
 
       if (stripeError) {
         console.error("Stripe error:", stripeError)
