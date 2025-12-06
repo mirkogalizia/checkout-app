@@ -1122,10 +1122,10 @@ function CheckoutInner({
   )
 }
 
-// Wrapper component (remains the same)
+// ========== WRAPPER COMPONENT CORRETTO ==========
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId") || ""
+  const sessionId = searchParams?.get("sessionId") || "" // 🔥 FIX: Optional chaining
 
   const [cart, setCart] = useState<CartSessionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1219,18 +1219,20 @@ function CheckoutPageContent() {
   )
 }
 
+// ========== EXPORT COMPONENT (CORRETTO) ==========
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600">Caricamento…</p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <div className="animate-spin h-12 w-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p className="text-gray-600">Caricamento…</p>
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <CheckoutPageContent />
     </Suspense>
   )
 }
-
