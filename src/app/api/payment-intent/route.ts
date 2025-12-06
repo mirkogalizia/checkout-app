@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null)
 
     const sessionId = body?.sessionId as string | undefined
-    const shopifyOrderId = body?.shopifyOrderId as string | undefined // 🔥 NUOVO
+    const shopifyOrderId = body?.shopifyOrderId as string | undefined
     const amountCents = body?.amountCents as number | undefined
     const customerBody = (body?.customer || {}) as CustomerPayload
 
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
         22
       )
 
-    // 🔥 Product title random DA FIREBASE CONFIG (come originale)
+    // 🔥 Product title random DA FIREBASE CONFIG
     const productTitles: string[] = []
     for (let i = 1; i <= 10; i++) {
       const key = `productTitle${i}` as keyof typeof activeAccount
@@ -250,7 +250,7 @@ export async function POST(req: NextRequest) {
 
     const userAgent = req.headers.get("user-agent") || "unknown"
 
-    // 🔥 PARAMETRI PAYMENT INTENT
+    // 🔥 PARAMETRI PAYMENT INTENT - SOLO CARTA
     const params: Stripe.PaymentIntentCreateParams = {
       amount: amountCents,
       currency,
@@ -260,11 +260,8 @@ export async function POST(req: NextRequest) {
       receipt_email: email || undefined,
       statement_descriptor_suffix: statementDescriptorSuffix,
 
-      // 🔥 SUPPORTA TUTTI I METODI DI PAGAMENTO
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: "always",
-      },
+      // ✅ SOLO CARTA (no Apple Pay, no Google Pay, no altri wallet)
+      payment_method_types: ['card'],
 
       // 🔥 3DS FORZATO PER CARTE
       payment_method_options: {
@@ -281,7 +278,7 @@ export async function POST(req: NextRequest) {
         session_id: sessionId,
         merchant_site: merchantSite,
         order_id: orderNumber,
-        shopify_order_id: shopifyOrderId || orderNumber, // 🔥 NUOVO
+        shopify_order_id: shopifyOrderId || orderNumber,
 
         // 🔥 Product title random DA CONFIG
         first_item_title: randomProductTitle,
@@ -338,7 +335,7 @@ export async function POST(req: NextRequest) {
       totalCents: amountCents,
       currency: currency.toUpperCase(),
       shopifyOrderNumber: orderNumber,
-      shopifyOrderId: shopifyOrderId || null, // 🔥 NUOVO
+      shopifyOrderId: shopifyOrderId || null,
       stripeAccountUsed: activeAccount.label,
       stripeCustomerId: stripeCustomerId,
       clientIp: clientIp,
