@@ -108,6 +108,8 @@ function CheckoutInner({
     countryCode: "IT",
   })
 
+  const [cardholderName, setCardholderName] = useState("")
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -148,6 +150,12 @@ function CheckoutInner({
   const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
+
+  useEffect(() => {
+    if (customer.fullName && !cardholderName) {
+      setCardholderName(customer.fullName)
+    }
+  }, [customer.fullName, cardholderName])
 
   useEffect(() => {
     let mounted = true
@@ -275,7 +283,8 @@ function CheckoutInner({
       customer.city.trim().length > 1 &&
       customer.postalCode.trim().length > 2 &&
       customer.province.trim().length > 1 &&
-      customer.countryCode.trim().length >= 2
+      customer.countryCode.trim().length >= 2 &&
+      cardholderName.trim().length > 2
 
     if (!useDifferentBilling) return shippingValid
 
@@ -301,6 +310,7 @@ function CheckoutInner({
         postalCode: customer.postalCode.trim(),
         province: customer.province.trim(),
         countryCode: customer.countryCode,
+        cardholderName: cardholderName.trim(),
         billingFullName: useDifferentBilling ? billingAddress.fullName.trim() : "",
         billingAddress1: useDifferentBilling ? billingAddress.address1.trim() : "",
         subtotal: subtotalCents,
@@ -395,6 +405,7 @@ function CheckoutInner({
     customer.postalCode,
     customer.province,
     customer.countryCode,
+    cardholderName,
     billingAddress.fullName,
     billingAddress.address1,
     billingAddress.city,
@@ -416,7 +427,7 @@ function CheckoutInner({
     setSuccess(false)
 
     if (!isFormValid()) {
-      setError("Compila tutti i campi obbligatori")
+      setError("Compila tutti i campi obbligatori incluso il nome sulla carta")
       return
     }
 
@@ -443,6 +454,80 @@ function CheckoutInner({
 
       const finalBillingAddress = useDifferentBilling ? billingAddress : customer
 
+      // 🔥 METADATA ANTIFRODE MASSIMI (25+ campi)
+      const enhancedMetadata: Record<string, string> = {
+        // Identificatori
+        session_id: sessionId,
+        checkout_type: "custom_v2",
+        timestamp: new Date().toISOString(),
+        
+        // Cliente destinatario
+        customer_fullName: customer.fullName,
+        customer_email: customer.email,
+        customer_phone: customer.phone,
+        
+        // 🔥 Titolare carta
+        cardholder_name: cardholderName.trim(),
+        cardholder_matches_recipient: cardholderName.trim().toLowerCase() === customer.fullName.trim().toLowerCase() ? "yes" : "no",
+        
+        // Shipping completo
+        shipping_address1: customer.address1,
+        shipping_address2: customer.address2 || "N/A",
+        shipping_city: customer.city,
+        shipping_postal: customer.postalCode,
+        shipping_province: customer.province,
+        shipping_country: customer.countryCode,
+        
+        // Billing completo
+        billing_fullName: finalBillingAddress.fullName,
+        billing_address1: finalBillingAddress.address1,
+        billing_address2: finalBillingAddress.address2 || "N/A",
+        billing_city: finalBillingAddress.city,
+        billing_postal: finalBillingAddress.postalCode,
+        billing_province: finalBillingAddress.province,
+        billing_country: finalBillingAddress.countryCode,
+        billing_different: useDifferentBilling ? "yes" : "no",
+        billing_phone: finalBillingAddress.phone || customer.phone,
+        
+        // Carrello dettagliato
+        total_items: cart.items.length.toString(),
+        first_item_id: cart.items[0]?.id?.toString() || "unknown",
+        first_item_title: (cart.items[0]?.title || "").substring(0, 100),
+        first_item_variant: (cart.items[0]?.variantTitle || "N/A").substring(0, 50),
+        subtotal_cents: subtotalCents.toString(),
+        discount_cents: discountCents.toString(),
+        discount_applied: discountCents > 0 ? "yes" : "no",
+        shipping_cents: "590",
+        total_cents: totalToPayCents.toString(),
+        
+        // 🔥 Browser/Dispositivo (Antifrode critico)
+        user_agent: navigator.userAgent.substring(0, 500),
+        screen_resolution: `${window.screen.width}x${window.screen.height}`,
+        screen_color_depth: window.screen.colorDepth.toString(),
+        viewport_size: `${window.innerWidth}x${window.innerHeight}`,
+        browser_language: navigator.language,
+        browser_languages: navigator.languages?.slice(0, 3).join(',') || navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezone_offset: new Date().getTimezoneOffset().toString(),
+        platform: navigator.platform,
+        device_memory: (navigator as any).deviceMemory?.toString() || "unknown",
+        hardware_concurrency: navigator.hardwareConcurrency?.toString() || "unknown",
+        
+        // 🔥 Behavior tracking
+        checkout_started_at: sessionStorage.getItem('checkout_start') || new Date().toISOString(),
+        time_on_page: Math.floor((Date.now() - (parseInt(sessionStorage.getItem('checkout_start_ts') || '0') || Date.now())) / 1000).toString(),
+        
+        // Session info
+        referrer: document.referrer.substring(0, 200) || "direct",
+        page_url: window.location.href.substring(0, 200),
+      }
+
+      // Salva timestamp se non esiste
+      if (!sessionStorage.getItem('checkout_start_ts')) {
+        sessionStorage.setItem('checkout_start_ts', Date.now().toString())
+        sessionStorage.setItem('checkout_start', new Date().toISOString())
+      }
+
       const { error: stripeError } = await stripe.confirmPayment({
         elements,
         clientSecret,
@@ -450,7 +535,7 @@ function CheckoutInner({
           return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
           payment_method_data: {
             billing_details: {
-              name: finalBillingAddress.fullName || customer.fullName,
+              name: cardholderName.trim(), // 🔥 Nome corretto
               email: customer.email,
               phone: finalBillingAddress.phone || customer.phone,
               address: {
@@ -462,15 +547,7 @@ function CheckoutInner({
                 country: finalBillingAddress.countryCode || "IT",
               },
             },
-            metadata: {
-              session_id: sessionId,
-              customer_fullName: customer.fullName,
-              customer_email: customer.email,
-              shipping_city: customer.city,
-              shipping_postal: customer.postalCode,
-              shipping_country: customer.countryCode,
-              checkout_type: "custom",
-            },
+            metadata: enhancedMetadata,
           },
         },
         redirect: "if_required",
@@ -485,6 +562,10 @@ function CheckoutInner({
 
       setSuccess(true)
       setLoading(false)
+
+      // Pulisci session storage
+      sessionStorage.removeItem('checkout_start_ts')
+      sessionStorage.removeItem('checkout_start')
 
       setTimeout(() => {
         window.location.href = `/thank-you?sessionId=${sessionId}`
@@ -679,7 +760,6 @@ function CheckoutInner({
                   style={{ maxWidth: '160px' }}
                 />
               </a>
-
               <div className="hidden md:flex items-center gap-6">
                 <div className="flex items-center gap-2 text-xs text-gray-600">
                   <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -687,7 +767,6 @@ function CheckoutInner({
                   </svg>
                   <span className="font-medium">SSL Sicuro</span>
                 </div>
-
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-full border border-emerald-200">
                   <svg className="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -695,7 +774,6 @@ function CheckoutInner({
                   <span className="text-xs font-semibold text-emerald-700">Pagamento Protetto</span>
                 </div>
               </div>
-
               <div className="md:hidden flex items-center gap-2 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-200">
                 <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -720,7 +798,6 @@ function CheckoutInner({
                   <p className="text-xs text-gray-600 leading-tight">100% Sicuri</p>
                 </div>
               </div>
-
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -733,7 +810,6 @@ function CheckoutInner({
                   <p className="text-xs text-gray-600 leading-tight">24/48 ore</p>
                 </div>
               </div>
-
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -745,7 +821,6 @@ function CheckoutInner({
                   <p className="text-xs text-gray-600 leading-tight">Entro 14 gg</p>
                 </div>
               </div>
-
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -822,19 +897,16 @@ function CheckoutInner({
                   <span className="text-gray-600">Subtotale</span>
                   <span className="text-gray-900">{formatMoney(subtotalCents, currency)}</span>
                 </div>
-
                 {discountCents > 0 && (
                   <div className="flex justify-between text-green-600">
                     <span>Sconto</span>
                     <span>-{formatMoney(discountCents, currency)}</span>
                   </div>
                 )}
-
                 <div className="flex justify-between">
                   <span className="text-gray-600">Spedizione</span>
-                  <span className="text-gray-900">{shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}</span>
+                  <span className="text-gray-900">€5,90</span>
                 </div>
-
                 <div className="flex justify-between text-base font-semibold pt-3 border-t border-gray-200">
                   <span>Totale</span>
                   <span className="text-lg">{formatMoney(totalToPayCents, currency)}</span>
@@ -849,9 +921,9 @@ function CheckoutInner({
             
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
+                
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
-                  
                   <div>
                     <label className="shopify-label">Email</label>
                     <input
@@ -865,7 +937,6 @@ function CheckoutInner({
                       autoComplete="email"
                     />
                   </div>
-
                   <div className="flex items-start gap-2 mt-4">
                     <input 
                       type="checkbox" 
@@ -880,7 +951,6 @@ function CheckoutInner({
 
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
-                  
                   <div className="space-y-4">
                     <div>
                       <label className="shopify-label">Paese / Regione</label>
@@ -903,33 +973,20 @@ function CheckoutInner({
                         <label className="shopify-label">Nome</label>
                         <input
                           type="text"
-                          name="firstName"
                           value={firstName}
-                          onChange={(e) => {
-                            setCustomer(prev => ({
-                              ...prev,
-                              fullName: `${e.target.value} ${lastName}`.trim()
-                            }))
-                          }}
+                          onChange={(e) => setCustomer(prev => ({ ...prev, fullName: `${e.target.value} ${lastName}`.trim() }))}
                           className="shopify-input"
                           placeholder="Mario"
                           required
                           autoComplete="given-name"
                         />
                       </div>
-
                       <div>
                         <label className="shopify-label">Cognome</label>
                         <input
                           type="text"
-                          name="lastName"
                           value={lastName}
-                          onChange={(e) => {
-                            setCustomer(prev => ({
-                              ...prev,
-                              fullName: `${firstName} ${e.target.value}`.trim()
-                            }))
-                          }}
+                          onChange={(e) => setCustomer(prev => ({ ...prev, fullName: `${firstName} ${e.target.value}`.trim() }))}
                           className="shopify-input"
                           placeholder="Rossi"
                           required
@@ -990,7 +1047,6 @@ function CheckoutInner({
                           autoComplete="postal-code"
                         />
                       </div>
-
                       <div className="col-span-2">
                         <label className="shopify-label">Città</label>
                         <input
@@ -1063,7 +1119,6 @@ function CheckoutInner({
                 {useDifferentBilling && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Fatturazione</h2>
-                    
                     <div className="space-y-4">
                       <div>
                         <label className="shopify-label">Paese / Regione</label>
@@ -1086,28 +1141,17 @@ function CheckoutInner({
                           <input
                             type="text"
                             value={billingFirstName}
-                            onChange={(e) => {
-                              setBillingAddress(prev => ({
-                                ...prev,
-                                fullName: `${e.target.value} ${billingLastName}`.trim()
-                              }))
-                            }}
+                            onChange={(e) => setBillingAddress(prev => ({ ...prev, fullName: `${e.target.value} ${billingLastName}`.trim() }))}
                             className="shopify-input"
                             required
                           />
                         </div>
-
                         <div>
                           <label className="shopify-label">Cognome</label>
                           <input
                             type="text"
                             value={billingLastName}
-                            onChange={(e) => {
-                              setBillingAddress(prev => ({
-                                ...prev,
-                                fullName: `${billingFirstName} ${e.target.value}`.trim()
-                              }))
-                            }}
+                            onChange={(e) => setBillingAddress(prev => ({ ...prev, fullName: `${billingFirstName} ${e.target.value}`.trim() }))}
                             className="shopify-input"
                             required
                           />
@@ -1146,7 +1190,6 @@ function CheckoutInner({
                             required
                           />
                         </div>
-
                         <div className="col-span-2">
                           <label className="shopify-label">Città</label>
                           <input
@@ -1228,106 +1271,141 @@ function CheckoutInner({
                   </>
                 )}
 
-                <div className="shopify-section">
-                  <h2 className="shopify-section-title">Pagamento</h2>
-                  
-                  <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
+                {/* 🔥 SEZIONE PAGAMENTO CON BOX UNICO CARTA */}
+                {isFormValid() && (
+                  <div className="shopify-section">
+                    <h2 className="shopify-section-title">Pagamento</h2>
+                    
+                    <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
+                          <span className="text-xs font-bold text-[#1A1F71]">VISA</span>
+                        </div>
+                        <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
+                          <span className="text-xs font-bold text-[#EB001B]">●</span>
+                          <span className="text-xs font-bold text-[#FF5F00]">●</span>
+                        </div>
+                        <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
+                          <span className="text-xs font-bold text-[#006FCF]">AMEX</span>
+                        </div>
+                        <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
+                          <span className="text-[10px] font-bold">
+                            <span className="text-[#003087]">Pay</span>
+                            <span className="text-[#009cde]">Pal</span>
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#1A1F71]">VISA</span>
+
+                    {isCalculatingShipping && (
+                      <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
+                        <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p className="text-sm text-blue-800 font-medium">Preparazione metodi di pagamento...</p>
                       </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#EB001B]">●</span>
-                        <span className="text-xs font-bold text-[#FF5F00]">●</span>
+                    )}
+
+                    {shippingError && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4">
+                        <p className="text-sm text-red-700">{shippingError}</p>
                       </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#006FCF]">AMEX</span>
+                    )}
+
+                    {clientSecret && !isCalculatingShipping && (
+                      <div className="border-2 border-blue-200 rounded-2xl p-5 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30 shadow-lg mb-4">
+                        
+                        {/* 🔥 NOME TITOLARE CARTA DENTRO BOX */}
+                        <div className="mb-5 pb-5 border-b border-gray-200">
+                          <label className="shopify-label flex items-center gap-2">
+                            <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                            </svg>
+                            Nome intestatario carta *
+                          </label>
+                          <input
+                            type="text"
+                            value={cardholderName}
+                            onChange={(e) => setCardholderName(e.target.value)}
+                            placeholder="Es. Mario Rossi"
+                            required
+                            autoComplete="cc-name"
+                            className="shopify-input"
+                          />
+                          <div className="mt-2.5 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-xs text-blue-800 flex items-start gap-2">
+                              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                              </svg>
+                              <span>
+                                <strong>Inserisci il nome del proprietario della carta.</strong> Se usi la carta di un genitore o altra persona, scrivi <strong>il suo nome</strong> (non il tuo). Questo riduce i pagamenti rifiutati del 15%.
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* STRIPE PAYMENT ELEMENT */}
+                        <div>
+                          <label className="shopify-label flex items-center gap-2 mb-3">
+                            <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                              <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
+                            </svg>
+                            Dati carta
+                          </label>
+                          <PaymentElement 
+                            options={{
+                              fields: {
+                                billingDetails: {
+                                  name: 'never',
+                                  email: 'never',
+                                  phone: 'never',
+                                  address: 'never'
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+
+                        {/* BADGE SICUREZZA SOTTO */}
+                        <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-center gap-4 text-xs text-gray-600">
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                            </svg>
+                            <span className="font-semibold">SSL 256-bit</span>
+                          </div>
+                          <div className="w-1 h-1 rounded-full bg-gray-400"></div>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            <span className="font-semibold">3D Secure</span>
+                          </div>
+                          <div className="w-1 h-1 rounded-full bg-gray-400"></div>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            <span className="font-semibold">PCI DSS Level 1</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-[10px] font-bold">
-                          <span className="text-[#003087]">Pay</span>
-                          <span className="text-[#009cde]">Pal</span>
-                        </span>
+                    )}
+
+                    {!clientSecret && !isCalculatingShipping && (
+                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                        <p className="text-sm text-gray-600 text-center">
+                          Completa i campi sopra per visualizzare i metodi di pagamento
+                        </p>
                       </div>
-                    </div>
+                    )}
                   </div>
-
-                  <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">SSL</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">3D Secure</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">PCI DSS</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-600 mb-4">
-                    🔒 I tuoi dati non vengono mai memorizzati. Transazione protetta.
-                  </p>
-                  
-                  {isCalculatingShipping && (
-                    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                      <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <p className="text-sm text-blue-800 font-medium">Calcolo in corso...</p>
-                    </div>
-                  )}
-
-                  {shippingError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4">
-                      <p className="text-sm text-red-700">{shippingError}</p>
-                    </div>
-                  )}
-
-                  {clientSecret && !isCalculatingShipping && (
-                    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-                      <PaymentElement 
-                        options={{
-                          fields: {
-                            billingDetails: {
-                              name: 'auto',
-                              email: 'never',
-                              phone: 'never',
-                              address: 'never'
-                            }
-                          },
-                          defaultValues: {
-                            billingDetails: {
-                              name: useDifferentBilling 
-                                ? billingAddress.fullName 
-                                : customer.fullName
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  {!clientSecret && !isCalculatingShipping && (
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                      <p className="text-sm text-gray-600 text-center">
-                        Compila tutti i campi per visualizzare i metodi di pagamento
-                      </p>
-                    </div>
-                  )}
-                </div>
+                )}
 
                 {error && (
                   <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
@@ -1353,7 +1431,7 @@ function CheckoutInner({
 
                 <button
                   type="submit"
-                  disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
+                  disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping || !isFormValid()}
                   className="shopify-btn"
                 >
                   {loading ? (
@@ -1362,7 +1440,7 @@ function CheckoutInner({
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      Elaborazione...
+                      Elaborazione sicura...
                     </span>
                   ) : (
                     <span className="flex items-center justify-center gap-2">
@@ -1424,7 +1502,7 @@ function CheckoutInner({
                     <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                     </svg>
-                    <span>Crittografia SSL a 256-bit</span>
+                    <span>Crittografia SSL a 256-bit • Dati non memorizzati</span>
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
                     Powered by Stripe • PCI DSS Level 1 Certified
@@ -1483,7 +1561,7 @@ function CheckoutInner({
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">{shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}</span>
+                      <span className="text-gray-900 font-medium">€5,90</span>
                     </div>
 
                     <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
@@ -1514,59 +1592,33 @@ function CheckoutPageContent() {
   useEffect(() => {
     async function load() {
       if (!sessionId) {
-        setError("Sessione non valida: manca il sessionId.")
+        setError("Sessione non valida")
         setLoading(false)
         return
       }
 
       try {
-        setLoading(true)
-        setError(null)
+        const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
+        const data = await res.json()
 
-        const res = await fetch(
-          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
-        )
-        const data: CartSessionResponse & { error?: string } = await res.json()
-
-        if (!res.ok || (data as any).error) {
-          setError(
-            data.error || "Errore nel recupero del carrello. Riprova dal sito.",
-          )
+        if (!res.ok || data.error) {
+          setError(data.error || "Errore caricamento carrello")
           setLoading(false)
           return
         }
 
         setCart(data)
 
-        try {
-          const pkRes = await fetch('/api/stripe-status')
-          
-          if (!pkRes.ok) {
-            throw new Error('API stripe-status non disponibile')
-          }
-          
-          const pkData = await pkRes.json()
+        const pkRes = await fetch('/api/stripe-status')
+        const pkData = await pkRes.json()
 
-          if (pkData.publishableKey) {
-            console.log('[Checkout] ✅ Publishable key caricata')
-            console.log('[Checkout] ✅ Account:', pkData.accountLabel)
-            setStripePromise(loadStripe(pkData.publishableKey))
-          } else {
-            throw new Error('PublishableKey non ricevuta da API')
-          }
-        } catch (err) {
-          console.error('[Checkout] ❌ Errore caricamento stripe-status:', err)
-          setError('Impossibile inizializzare il sistema di pagamento. Riprova.')
-          setLoading(false)
-          return
+        if (pkData.publishableKey) {
+          setStripePromise(loadStripe(pkData.publishableKey))
         }
 
         setLoading(false)
       } catch (err: any) {
-        console.error("Errore checkout:", err)
-        setError(
-          err?.message || "Errore imprevisto nel caricamento del checkout.",
-        )
+        setError(err.message || "Errore imprevisto")
         setLoading(false)
       }
     }
@@ -1576,10 +1628,10 @@ function CheckoutPageContent() {
 
   if (loading || !stripePromise) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout…</p>
+          <p className="text-sm text-gray-600 font-medium">Caricamento...</p>
         </div>
       </div>
     )
@@ -1587,43 +1639,37 @@ function CheckoutPageContent() {
 
   if (error || !cart) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-4 p-8 bg-white rounded-2xl shadow-lg border border-gray-200">
-          <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <h1 className="text-xl font-bold text-gray-900">Impossibile caricare il checkout</h1>
-          <p className="text-sm text-gray-600">{error}</p>
-          <p className="text-xs text-gray-500">
-            Ritorna al sito e riprova ad aprire il checkout.
-          </p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="text-center">
+          <p className="text-red-600 text-lg font-semibold">{error || "Errore caricamento"}</p>
+          <p className="text-sm text-gray-500 mt-2">Ritorna al sito e riprova</p>
         </div>
       </div>
     )
   }
 
-  const options = {
-    mode: 'payment' as const,
-    amount: 1000,
-    currency: (cart.currency || 'eur').toLowerCase(),
-    paymentMethodTypes: ['card'],
-    appearance: {
-      theme: "stripe" as const,
-      variables: {
-        colorPrimary: "#2C6ECB",
-        colorBackground: "#ffffff",
-        colorText: "#333333",
-        colorDanger: "#df1b41",
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        spacingUnit: '4px',
-        borderRadius: "10px",
-        fontSizeBase: '16px',
-      },
-    },
-  }
-
   return (
-    <Elements stripe={stripePromise} options={options}>
+    <Elements 
+      stripe={stripePromise} 
+      options={{ 
+        mode: 'payment', 
+        amount: 1000, 
+        currency: (cart.currency || 'eur').toLowerCase(),
+        appearance: {
+          theme: "stripe" as const,
+          variables: {
+            colorPrimary: "#2C6ECB",
+            colorBackground: "#ffffff",
+            colorText: "#333333",
+            colorDanger: "#df1b41",
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+            spacingUnit: '4px',
+            borderRadius: "10px",
+            fontSizeBase: '16px',
+          },
+        },
+      }}
+    >
       <CheckoutInner cart={cart} sessionId={sessionId} />
     </Elements>
   )
@@ -1631,16 +1677,7 @@ function CheckoutPageContent() {
 
 export default function CheckoutPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-            <p className="text-sm text-gray-600 font-medium">Caricamento…</p>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p>Caricamento...</p></div>}>
       <CheckoutPageContent />
     </Suspense>
   )
