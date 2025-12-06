@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null)
 
     const sessionId = body?.sessionId as string | undefined
+    const shopifyOrderId = body?.shopifyOrderId as string | undefined // 🔥 NUOVO
     const amountCents = body?.amountCents as number | undefined
     const customerBody = (body?.customer || {}) as CustomerPayload
 
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // 🔥 Recupera sessione esistente
     const snap = await db.collection(COLLECTION).doc(sessionId).get()
     if (!snap.exists) {
       return NextResponse.json(
@@ -50,6 +52,7 @@ export async function POST(req: NextRequest) {
     const data: any = snap.data() || {}
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
+    // 🔥 Estrai dati cliente
     const fullNameRaw =
       customerBody.fullName ||
       `${customerBody.firstName || ""} ${customerBody.lastName || ""}`.trim()
@@ -64,7 +67,7 @@ export async function POST(req: NextRequest) {
     const province = customerBody.province || ""
     const countryCode = (customerBody.countryCode || "IT").toUpperCase()
 
-    // 🟦 Recupera account Stripe attivo
+    // 🔥 Recupera account Stripe attivo
     const activeAccount = await getActiveStripeAccount()
     const secretKey = activeAccount.secretKey
     const publishableKey = activeAccount.publishableKey
@@ -77,7 +80,7 @@ export async function POST(req: NextRequest) {
         22
       )
 
-    // 🟦 Product title random (anti pattern frodi)
+    // 🔥 Product title random DA FIREBASE CONFIG (come originale)
     const productTitles: string[] = []
     for (let i = 1; i <= 10; i++) {
       const key = `productTitle${i}` as keyof typeof activeAccount
@@ -93,12 +96,86 @@ export async function POST(req: NextRequest) {
 
     console.log(`[payment-intent] 🔄 Account attivo: ${activeAccount.label}`)
 
-    // 🟦 Inizializza Stripe
+    // 🔥 Inizializza Stripe
     const stripe = new Stripe(secretKey, {
       apiVersion: "2025-10-29.clover",
     })
 
-    // 🟦 CREA O OTTIENI CUSTOMER
+    // 🔥 VERIFICA SE ESISTE GIÀ UN PAYMENT INTENT
+    const existingPaymentIntentId = data.paymentIntentId as string | undefined
+
+    if (existingPaymentIntentId) {
+      try {
+        console.log(`[payment-intent] 🔄 Verifico PI esistente: ${existingPaymentIntentId}`)
+        
+        const existingPI = await stripe.paymentIntents.retrieve(existingPaymentIntentId)
+
+        // Se il PI è ancora utilizzabile
+        if (
+          existingPI.status === "requires_payment_method" ||
+          existingPI.status === "requires_confirmation" ||
+          existingPI.status === "requires_action"
+        ) {
+          // Verifica se l'amount è cambiato
+          if (existingPI.amount === amountCents) {
+            console.log(`[payment-intent] ♻️ Riuso PI esistente (amount invariato)`)
+            
+            return NextResponse.json(
+              {
+                id: existingPI.id,
+                clientSecret: existingPI.client_secret,
+                publishableKey: publishableKey,
+                accountUsed: activeAccount.label,
+              },
+              { status: 200 }
+            )
+          } else {
+            // Amount cambiato → UPDATE
+            console.log(
+              `[payment-intent] 🔄 UPDATE PI (€${existingPI.amount / 100} → €${amountCents / 100})`
+            )
+
+            const updatedPI = await stripe.paymentIntents.update(existingPaymentIntentId, {
+              amount: amountCents,
+              metadata: {
+                ...existingPI.metadata,
+                amount_updated: "true",
+                updated_at: new Date().toISOString(),
+                shopify_order_id: shopifyOrderId || existingPI.metadata.shopify_order_id,
+              },
+            })
+
+            await db.collection(COLLECTION).doc(sessionId).update({
+              totalCents: amountCents,
+              paymentIntentUpdated: true,
+              updatedAt: new Date().toISOString(),
+            })
+
+            return NextResponse.json(
+              {
+                id: updatedPI.id,
+                clientSecret: updatedPI.client_secret,
+                publishableKey: publishableKey,
+                accountUsed: activeAccount.label,
+              },
+              { status: 200 }
+            )
+          }
+        } else {
+          console.log(
+            `[payment-intent] ⚠️ PI esistente non riutilizzabile (status: ${existingPI.status}), creo nuovo`
+          )
+        }
+      } catch (retrieveError: any) {
+        console.log(
+          `[payment-intent] ⚠️ Errore retrieve PI: ${retrieveError.message}, creo nuovo`
+        )
+      }
+    }
+
+    // 🔥 CREA NUOVO PAYMENT INTENT
+
+    // 🔥 CREA O OTTIENI CUSTOMER
     let stripeCustomerId = data.stripeCustomerId as string | undefined
 
     if (!stripeCustomerId && email) {
@@ -110,6 +187,7 @@ export async function POST(req: NextRequest) {
 
         if (existingCustomers.data.length > 0) {
           stripeCustomerId = existingCustomers.data[0].id
+          console.log(`[payment-intent] ♻️ Customer esistente: ${stripeCustomerId}`)
         } else {
           const customer = await stripe.customers.create({
             email,
@@ -133,20 +211,21 @@ export async function POST(req: NextRequest) {
           })
 
           stripeCustomerId = customer.id
+          console.log(`[payment-intent] 🆕 Customer creato: ${stripeCustomerId}`)
 
           await db.collection(COLLECTION).doc(sessionId).update({
             stripeCustomerId,
           })
         }
       } catch (customerError: any) {
-        console.error("Customer error:", customerError)
+        console.error("[payment-intent] ❌ Errore customer:", customerError.message)
       }
     }
 
-    const orderNumber = data.orderNumber || sessionId
+    const orderNumber = shopifyOrderId || data.orderNumber || sessionId
     const description = `${orderNumber} | ${fullName || "Guest"}`
 
-    // 🟦 Shipping
+    // 🔥 Shipping
     let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined
     if (fullName && address1 && city && postalCode) {
       shipping = {
@@ -163,7 +242,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 💥 ECCO LA PATCH 3D SECURE + ANTIFRODE (PUNTO 1)
+    // 🔥 IP e User-Agent per Radar
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown"
+
+    const userAgent = req.headers.get("user-agent") || "unknown"
+
+    // 🔥 PARAMETRI PAYMENT INTENT
     const params: Stripe.PaymentIntentCreateParams = {
       amount: amountCents,
       currency,
@@ -173,22 +260,30 @@ export async function POST(req: NextRequest) {
       receipt_email: email || undefined,
       statement_descriptor_suffix: statementDescriptorSuffix,
 
-      // 🔥 3️⃣ 3D SECURE FORZATO SEMPRE
-      payment_method_types: ["card"],
+      // 🔥 SUPPORTA TUTTI I METODI DI PAGAMENTO
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: "always",
+      },
+
+      // 🔥 3DS FORZATO PER CARTE
       payment_method_options: {
         card: {
-          request_three_d_secure: "any", // <----- FORZA 3DS SEMPRE
+          request_three_d_secure: "any",
         },
       },
 
       // 📦 Shipping (usato da Radar)
       shipping,
 
-      // 🔒 ANTIFRODE METADATA MASSIMI
+      // 🔒 METADATA ANTIFRODE COMPLETI
       metadata: {
         session_id: sessionId,
         merchant_site: merchantSite,
         order_id: orderNumber,
+        shopify_order_id: shopifyOrderId || orderNumber, // 🔥 NUOVO
+
+        // 🔥 Product title random DA CONFIG
         first_item_title: randomProductTitle,
 
         // 🧠 Dati cliente
@@ -196,13 +291,13 @@ export async function POST(req: NextRequest) {
         customer_name: fullName || "",
         customer_phone: phone || "",
 
-        // 📦 Address matching (importante per Radar)
+        // 📦 Address matching
         shipping_address: address1 || "",
         shipping_city: city || "",
         shipping_postal_code: postalCode || "",
         shipping_country: countryCode,
 
-        // 🕵️‍♂️ Identificazione transazione
+        // 🕵️‍♂️ Identificazione
         stripe_account: activeAccount.label,
         stripe_account_order: String(activeAccount.order || 0),
         checkout_type: "custom",
@@ -210,19 +305,20 @@ export async function POST(req: NextRequest) {
         // 📅 Timestamp
         created_at: new Date().toISOString(),
 
-        // 🔥 Dati antifrode aggiuntivi
-        customer_ip:
-          req.headers.get("x-forwarded-for") ||
-          req.headers.get("x-real-ip") ||
-          "",
-        user_agent: req.headers.get("user-agent") || "",
+        // 🔥 Antifrode tecnico
+        customer_ip: clientIp,
+        user_agent: userAgent,
       },
     }
 
-    // 🟦 CREA PAYMENT INTENT
+    console.log(`[payment-intent] 🆕 Creazione PI per €${amountCents / 100}`)
+
+    // 🔥 CREA PAYMENT INTENT
     const paymentIntent = await stripe.paymentIntents.create(params)
 
-    // 🟦 SALVA IN FIREBASE
+    console.log(`[payment-intent] ✅ PI creato: ${paymentIntent.id}`)
+
+    // 🔥 SALVA IN FIREBASE
     await db.collection(COLLECTION).doc(sessionId).update({
       customer: {
         fullName,
@@ -242,13 +338,16 @@ export async function POST(req: NextRequest) {
       totalCents: amountCents,
       currency: currency.toUpperCase(),
       shopifyOrderNumber: orderNumber,
+      shopifyOrderId: shopifyOrderId || null, // 🔥 NUOVO
       stripeAccountUsed: activeAccount.label,
       stripeCustomerId: stripeCustomerId,
+      clientIp: clientIp,
       updatedAt: new Date().toISOString(),
     })
 
     return NextResponse.json(
       {
+        id: paymentIntent.id,
         clientSecret: paymentIntent.client_secret,
         publishableKey: publishableKey,
         accountUsed: activeAccount.label,
@@ -256,9 +355,9 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     )
   } catch (error: any) {
-    console.error("Errore:", error)
+    console.error("[payment-intent] ❌ Errore:", error)
     return NextResponse.json(
-      { error: error?.message || "Errore interno" },
+      { error: error?.message || "Errore interno del server" },
       { status: 500 }
     )
   }
