@@ -153,6 +153,9 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
+  // ✨ SOLO UI - Calcola se spedizione gratuita attiva
+  const isFreeShipping = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS
+
   useEffect(() => {
     let mounted = true
     const win = window as any
@@ -334,7 +337,7 @@ function CheckoutInner({
         setShippingError(null)
 
         try {
-          const flatShippingCents = subtotalCents >= 5900 ? 0 : 590  // Spedizione gratuita sopra 59€
+          const flatShippingCents = subtotalCents >= 5900 ? 0 : 590
           setCalculatedShippingCents(flatShippingCents)
 
           const shopifyTotal = typeof cart.totalCents === "number" ? cart.totalCents : subtotalCents
@@ -448,44 +451,42 @@ function CheckoutInner({
       const finalBillingAddress = useDifferentBilling ? billingAddress : customer
 
       const { error: stripeError } = await stripe.confirmPayment({
-  elements,
-  clientSecret,
+        elements,
+        clientSecret,
 
-  confirmParams: {
-    return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
+        confirmParams: {
+          return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
 
-    payment_method_data: {
-      billing_details: {
-        name: finalBillingAddress.fullName || customer.fullName,
-        email: customer.email,
-        phone: finalBillingAddress.phone || customer.phone,
+          payment_method_data: {
+            billing_details: {
+              name: finalBillingAddress.fullName || customer.fullName,
+              email: customer.email,
+              phone: finalBillingAddress.phone || customer.phone,
 
-        address: {
-          line1: finalBillingAddress.address1,
-          line2: finalBillingAddress.address2 || undefined,
-          city: finalBillingAddress.city,
-          postal_code: finalBillingAddress.postalCode,
-          state: finalBillingAddress.province,
-          country: finalBillingAddress.countryCode || "IT",
+              address: {
+                line1: finalBillingAddress.address1,
+                line2: finalBillingAddress.address2 || undefined,
+                city: finalBillingAddress.city,
+                postal_code: finalBillingAddress.postalCode,
+                state: finalBillingAddress.province,
+                country: finalBillingAddress.countryCode || "IT",
+              },
+            },
+
+            metadata: {
+              session_id: sessionId,
+              customer_fullName: customer.fullName,
+              customer_email: customer.email,
+              shipping_city: customer.city,
+              shipping_postal: customer.postalCode,
+              shipping_country: customer.countryCode,
+              checkout_type: "custom",
+            },
+          },
         },
-      },
 
-      // 🔥 ANTIFRODE RADAR EXTRA
-      metadata: {
-        session_id: sessionId,
-        customer_fullName: customer.fullName,
-        customer_email: customer.email,
-        shipping_city: customer.city,
-        shipping_postal: customer.postalCode,
-        shipping_country: customer.countryCode,
-        checkout_type: "custom",
-      },
-    },
-  },
-
-  // 🔥 Obbliga 3DS se necessario
-  redirect: "if_required",
-})
+        redirect: "if_required",
+      })
 
       if (stripeError) {
         console.error("Stripe error:", stripeError)
@@ -506,6 +507,7 @@ function CheckoutInner({
       setLoading(false)
     }
   }
+
   return (
     <>
       <style jsx global>{`
@@ -678,7 +680,6 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        {/* ✅ HEADER PREMIUM CON TRUST */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
@@ -691,7 +692,6 @@ function CheckoutInner({
                 />
               </a>
 
-              {/* Desktop Trust */}
               <div className="hidden md:flex items-center gap-6">
                 <div className="flex items-center gap-2 text-xs text-gray-600">
                   <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -708,7 +708,6 @@ function CheckoutInner({
                 </div>
               </div>
 
-              {/* Mobile Trust */}
               <div className="md:hidden flex items-center gap-2 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-200">
                 <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -719,7 +718,6 @@ function CheckoutInner({
           </div>
         </header>
 
-        {/* ✅ TRUST BANNER */}
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -775,6 +773,32 @@ function CheckoutInner({
           </div>
         </div>
 
+        {/* ✨ BANNER SPEDIZIONE GRATUITA - SOLO QUANDO ATTIVA */}
+        {isFreeShipping && (
+          <div className="max-w-6xl mx-auto px-4 mb-6">
+            <div className="bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-400 rounded-2xl p-5 shadow-xl">
+              <div className="flex items-center gap-4">
+                <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center shadow-lg">
+                  <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <p className="text-lg md:text-xl font-extrabold text-gray-900 mb-1 flex items-center gap-2 flex-wrap">
+                    🎊 COMPLIMENTI! SPEDIZIONE GRATUITA ATTIVATA!
+                    <span className="inline-block px-3 py-1 bg-green-600 text-white text-sm rounded-full font-bold shadow-md">
+                      RISPARMI €5,90
+                    </span>
+                  </p>
+                  <p className="text-sm text-gray-700 font-medium">
+                    Il tuo ordine supera i 59€ e ricevi la spedizione GRATIS 🚚✨
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Mobile Summary Toggle */}
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
@@ -803,6 +827,43 @@ function CheckoutInner({
 
           {orderSummaryExpanded && (
             <div className="summary-content">
+              {/* ✨ BOX RISPARMIO MOBILE - SOLO SE CI SONO SCONTI O SPEDIZIONE GRATUITA */}
+              {(discountCents > 0 || isFreeShipping) && (
+                <div className="mb-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl shadow-md">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h3 className="text-base font-bold text-gray-900">🎉 Stai Risparmiando!</h3>
+                  </div>
+                  <div className="space-y-2">
+                    {discountCents > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-700 font-medium">💸 Sconto Prodotti</span>
+                        <span className="text-lg font-bold text-green-600">-{formatMoney(discountCents, currency)}</span>
+                      </div>
+                    )}
+                    {isFreeShipping && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-700 font-medium">🚚 Spedizione Gratuita</span>
+                        <span className="text-lg font-bold text-green-600">-€5,90</span>
+                      </div>
+                    )}
+                    <div className="pt-2 border-t-2 border-green-300 mt-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-bold text-gray-900">Risparmio Totale</span>
+                        <span className="text-xl font-extrabold text-green-600">
+                          -{formatMoney(discountCents + (isFreeShipping ? 590 : 0), currency)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3 mb-4">
                 {cart.items.map((item, idx) => (
                   <div key={idx} className="flex gap-3">
@@ -838,15 +899,19 @@ function CheckoutInner({
                 </div>
 
                 {discountCents > 0 && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Sconto</span>
-                    <span>-{formatMoney(discountCents, currency)}</span>
+                  <div className="flex justify-between">
+                    <span className="text-green-600 font-medium">✨ Sconto</span>
+                    <span className="text-green-600 font-semibold">-{formatMoney(discountCents, currency)}</span>
                   </div>
                 )}
 
                 <div className="flex justify-between">
                   <span className="text-gray-600">Spedizione</span>
-                  <span className="text-gray-900">{subtotalCents >= 5900 && calculatedShippingCents === 0 ? "Gratis" : (calculatedShippingCents > 0 ? formatMoney(calculatedShippingCents, currency) : formatMoney(590, currency))}</span>
+                  {isFreeShipping ? (
+                    <span className="text-green-600 font-bold text-base">🚚 GRATIS</span>
+                  ) : (
+                    <span className="text-gray-900">{formatMoney(shippingToApply, currency)}</span>
+                  )}
                 </div>
 
                 <div className="flex justify-between text-base font-semibold pt-3 border-t border-gray-200">
@@ -1108,6 +1173,7 @@ function CheckoutInner({
                               }))
                             }}
                             className="shopify-input"
+                            placeholder="Mario"
                             required
                           />
                         </div>
@@ -1124,6 +1190,7 @@ function CheckoutInner({
                               }))
                             }}
                             className="shopify-input"
+                            placeholder="Rossi"
                             required
                           />
                         </div>
@@ -1136,6 +1203,7 @@ function CheckoutInner({
                           value={billingAddress.address1}
                           onChange={(e) => setBillingAddress(prev => ({ ...prev, address1: e.target.value }))}
                           className="shopify-input"
+                          placeholder="Via Roma 123"
                           required
                         />
                       </div>
@@ -1147,6 +1215,7 @@ function CheckoutInner({
                           value={billingAddress.address2}
                           onChange={(e) => setBillingAddress(prev => ({ ...prev, address2: e.target.value }))}
                           className="shopify-input"
+                          placeholder="Scala B, Piano 3"
                         />
                       </div>
 
@@ -1158,6 +1227,7 @@ function CheckoutInner({
                             value={billingAddress.postalCode}
                             onChange={(e) => setBillingAddress(prev => ({ ...prev, postalCode: e.target.value }))}
                             className="shopify-input"
+                            placeholder="00100"
                             required
                           />
                         </div>
@@ -1169,6 +1239,7 @@ function CheckoutInner({
                             value={billingAddress.city}
                             onChange={(e) => setBillingAddress(prev => ({ ...prev, city: e.target.value }))}
                             className="shopify-input"
+                            placeholder="Roma"
                             required
                           />
                         </div>
@@ -1181,6 +1252,7 @@ function CheckoutInner({
                           value={billingAddress.province}
                           onChange={(e) => setBillingAddress(prev => ({ ...prev, province: e.target.value }))}
                           className="shopify-input"
+                          placeholder="RM"
                           required
                         />
                       </div>
@@ -1201,7 +1273,6 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* ✅ SOCIAL PROOF */}
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex -space-x-3">
@@ -1247,7 +1318,6 @@ function CheckoutInner({
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
                   
-                  {/* ✅ METODI PAGAMENTO */}
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
@@ -1272,7 +1342,6 @@ function CheckoutInner({
                     </div>
                   </div>
 
-                  {/* ✅ SICUREZZA ROW */}
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -1392,7 +1461,6 @@ function CheckoutInner({
                   )}
                 </button>
 
-                {/* ✅ GARANZIE FINALI */}
                 <div className="mt-6 space-y-3">
                   <div className="flex items-start gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
                     <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
@@ -1459,6 +1527,43 @@ function CheckoutInner({
                 <div className="shopify-section">
                   <h3 className="shopify-section-title">Riepilogo ordine</h3>
 
+                  {/* ✨ BOX RISPARMIO DESKTOP - SOLO SE CI SONO SCONTI O SPEDIZIONE GRATUITA */}
+                  {(discountCents > 0 || isFreeShipping) && (
+                    <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl shadow-lg">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center shadow-md">
+                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-extrabold text-gray-900">🎉 Stai Risparmiando!</h3>
+                      </div>
+                      <div className="space-y-3">
+                        {discountCents > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700 font-semibold">💸 Sconto Prodotti</span>
+                            <span className="text-xl font-extrabold text-green-600">-{formatMoney(discountCents, currency)}</span>
+                          </div>
+                        )}
+                        {isFreeShipping && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700 font-semibold">🚚 Spedizione Gratuita</span>
+                            <span className="text-xl font-extrabold text-green-600">-€5,90</span>
+                          </div>
+                        )}
+                        <div className="pt-3 border-t-2 border-green-400 mt-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-base font-extrabold text-gray-900">Risparmio Totale</span>
+                            <span className="text-2xl font-black text-green-600">
+                              -{formatMoney(discountCents + (isFreeShipping ? 590 : 0), currency)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-4 mb-6">
                     {cart.items.map((item, idx) => (
                       <div key={idx} className="flex gap-3">
@@ -1494,15 +1599,19 @@ function CheckoutInner({
                     </div>
 
                     {discountCents > 0 && (
-                      <div className="flex justify-between text-green-600">
-                        <span className="font-medium">Sconto</span>
-                        <span className="font-semibold">-{formatMoney(discountCents, currency)}</span>
+                      <div className="flex justify-between">
+                        <span className="text-green-600 font-medium">✨ Sconto</span>
+                        <span className="text-green-600 font-semibold">-{formatMoney(discountCents, currency)}</span>
                       </div>
                     )}
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">{subtotalCents >= 5900 && calculatedShippingCents === 0 ? "Gratis" : (calculatedShippingCents > 0 ? formatMoney(calculatedShippingCents, currency) : formatMoney(590, currency))}</span>
+                      {isFreeShipping ? (
+                        <span className="text-green-600 font-extrabold text-base">🚚 GRATIS</span>
+                      ) : (
+                        <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
+                      )}
                     </div>
 
                     <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
@@ -1521,7 +1630,6 @@ function CheckoutInner({
   )
 }
 
-// Rest of the file (CheckoutPageContent, export default) remains exactly the same...
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""
@@ -1665,3 +1773,4 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
+
