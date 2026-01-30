@@ -143,7 +143,7 @@ function CheckoutInner({
   }, [subtotalCents, cart.totalCents])
 
   const SHIPPING_COST_CENTS = 590
-  const FREE_SHIPPING_THRESHOLD_CENTS = 5900  // 59€
+  const FREE_SHIPPING_THRESHOLD_CENTS = 5900
   const shippingToApply = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : SHIPPING_COST_CENTS
   const totalToPayCents = subtotalCents - discountCents + shippingToApply
 
@@ -153,7 +153,6 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // ✨ SOLO UI - Calcola se spedizione gratuita attiva
   const isFreeShipping = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS
 
   useEffect(() => {
@@ -773,7 +772,6 @@ function CheckoutInner({
           </div>
         </div>
 
-        {/* ✨ BANNER SPEDIZIONE GRATUITA - SOLO QUANDO ATTIVA */}
         {isFreeShipping && (
           <div className="max-w-6xl mx-auto px-4 mb-6">
             <div className="bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-400 rounded-2xl p-5 shadow-xl">
@@ -799,7 +797,6 @@ function CheckoutInner({
           </div>
         )}
 
-        {/* Mobile Summary Toggle */}
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
             className="summary-toggle"
@@ -827,7 +824,6 @@ function CheckoutInner({
 
           {orderSummaryExpanded && (
             <div className="summary-content">
-              {/* ✨ BOX RISPARMIO MOBILE - SOLO SE CI SONO SCONTI O SPEDIZIONE GRATUITA */}
               {(discountCents > 0 || isFreeShipping) && (
                 <div className="mb-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl shadow-md">
                   <div className="flex items-center gap-2 mb-3">
@@ -865,31 +861,89 @@ function CheckoutInner({
               )}
 
               <div className="space-y-3 mb-4">
-                {cart.items.map((item, idx) => (
-                  <div key={idx} className="flex gap-3">
-                    {item.image && (
-                      <div className="relative flex-shrink-0">
-                        <img
-                          src={item.image}
-                          alt={item.title}
-                          className="w-16 h-16 object-cover rounded-lg border border-gray-200"
-                        />
-                        <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium shadow-sm">
-                          {item.quantity}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                      {item.variantTitle && (
-                        <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
+                {cart.items.map((item, idx) => {
+                  const originalPrice = item.priceCents || 0
+                  const currentPrice = item.linePriceCents || 0
+                  const expectedTotal = originalPrice * item.quantity
+                  const discountAmount = expectedTotal - currentPrice
+                  const isFullyFree = currentPrice === 0 && originalPrice > 0
+                  const isDiscounted = discountAmount > 0
+                  
+                  return (
+                    <div key={idx} className="flex gap-3 relative">
+                      {isFullyFree && (
+                        <div className="absolute -top-2 left-12 z-10 bg-gradient-to-r from-red-500 to-pink-600 text-white text-xs font-extrabold px-2.5 py-1 rounded-full shadow-lg animate-pulse">
+                          3x2 GRATIS 🎁
+                        </div>
                       )}
+                      {!isFullyFree && isDiscounted && (
+                        <div className="absolute -top-2 left-12 z-10 bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
+                          SCONTO
+                        </div>
+                      )}
+                      
+                      {item.image && (
+                        <div className="relative flex-shrink-0">
+                          <img
+                            src={item.image}
+                            alt={item.title}
+                            className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                          />
+                          <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium shadow-sm">
+                            {item.quantity}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
+                        {item.variantTitle && (
+                          <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
+                        )}
+                        {isDiscounted && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs line-through text-gray-400">
+                              {formatMoney(expectedTotal, currency)}
+                            </span>
+                            {isFullyFree ? (
+                              <span className="text-xs font-extrabold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
+                                -100% GRATIS
+                              </span>
+                            ) : (
+                              <span className="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                                -{formatMoney(discountAmount, currency)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end justify-center">
+                        {isFullyFree ? (
+                          <>
+                            <p className="text-xs line-through text-gray-400">
+                              {formatMoney(expectedTotal, currency)}
+                            </p>
+                            <p className="text-base font-extrabold text-green-600">
+                              GRATIS
+                            </p>
+                          </>
+                        ) : isDiscounted ? (
+                          <>
+                            <p className="text-xs line-through text-gray-400">
+                              {formatMoney(expectedTotal, currency)}
+                            </p>
+                            <p className="text-sm font-bold text-green-600">
+                              {formatMoney(currentPrice, currency)}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm font-medium text-gray-900">
+                            {formatMoney(currentPrice, currency)}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm font-medium text-gray-900 flex-shrink-0">
-                      {formatMoney(item.linePriceCents || item.priceCents || 0, currency)}
-                    </p>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               <div className="border-t border-gray-200 pt-3 space-y-2 text-sm">
@@ -1521,13 +1575,11 @@ function CheckoutInner({
               </form>
             </div>
 
-            {/* Desktop Summary Sidebar */}
             <div className="hidden lg:block">
               <div className="sticky top-24">
                 <div className="shopify-section">
                   <h3 className="shopify-section-title">Riepilogo ordine</h3>
 
-                  {/* ✨ BOX RISPARMIO DESKTOP - SOLO SE CI SONO SCONTI O SPEDIZIONE GRATUITA */}
                   {(discountCents > 0 || isFreeShipping) && (
                     <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl shadow-lg">
                       <div className="flex items-center gap-3 mb-4">
@@ -1565,31 +1617,89 @@ function CheckoutInner({
                   )}
 
                   <div className="space-y-4 mb-6">
-                    {cart.items.map((item, idx) => (
-                      <div key={idx} className="flex gap-3">
-                        {item.image && (
-                          <div className="relative flex-shrink-0">
-                            <img
-                              src={item.image}
-                              alt={item.title}
-                              className="w-20 h-20 object-cover rounded-xl border border-gray-200"
-                            />
-                            <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-semibold shadow-md">
-                              {item.quantity}
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900">{item.title}</p>
-                          {item.variantTitle && (
-                            <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
+                    {cart.items.map((item, idx) => {
+                      const originalPrice = item.priceCents || 0
+                      const currentPrice = item.linePriceCents || 0
+                      const expectedTotal = originalPrice * item.quantity
+                      const discountAmount = expectedTotal - currentPrice
+                      const isFullyFree = currentPrice === 0 && originalPrice > 0
+                      const isDiscounted = discountAmount > 0
+                      
+                      return (
+                        <div key={idx} className="flex gap-3 relative">
+                          {isFullyFree && (
+                            <div className="absolute -top-3 left-16 z-10 bg-gradient-to-r from-red-500 to-pink-600 text-white text-sm font-extrabold px-3 py-1.5 rounded-full shadow-xl animate-pulse">
+                              3x2 GRATIS 🎁
+                            </div>
                           )}
+                          {!isFullyFree && isDiscounted && (
+                            <div className="absolute -top-2 left-16 z-10 bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg">
+                              SCONTO ATTIVO
+                            </div>
+                          )}
+                          
+                          {item.image && (
+                            <div className="relative flex-shrink-0">
+                              <img
+                                src={item.image}
+                                alt={item.title}
+                                className="w-20 h-20 object-cover rounded-xl border border-gray-200"
+                              />
+                              <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-semibold shadow-md">
+                                {item.quantity}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                            {item.variantTitle && (
+                              <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
+                            )}
+                            {isDiscounted && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-sm line-through text-gray-400 font-medium">
+                                  {formatMoney(expectedTotal, currency)}
+                                </span>
+                                {isFullyFree ? (
+                                  <span className="text-sm font-extrabold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
+                                    -100% GRATIS 🔥
+                                  </span>
+                                ) : (
+                                  <span className="text-sm font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
+                                    -{formatMoney(discountAmount, currency)}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end justify-center flex-shrink-0">
+                            {isFullyFree ? (
+                              <>
+                                <p className="text-sm line-through text-gray-400">
+                                  {formatMoney(expectedTotal, currency)}
+                                </p>
+                                <p className="text-xl font-extrabold text-green-600">
+                                  GRATIS ✨
+                                </p>
+                              </>
+                            ) : isDiscounted ? (
+                              <>
+                                <p className="text-sm line-through text-gray-400">
+                                  {formatMoney(expectedTotal, currency)}
+                                </p>
+                                <p className="text-base font-bold text-green-600">
+                                  {formatMoney(currentPrice, currency)}
+                                </p>
+                              </>
+                            ) : (
+                              <p className="text-sm font-semibold text-gray-900">
+                                {formatMoney(currentPrice, currency)}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-sm font-semibold text-gray-900 flex-shrink-0">
-                          {formatMoney(item.linePriceCents || item.priceCents || 0, currency)}
-                        </p>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
 
                   <div className="border-t border-gray-200 pt-4 space-y-3 text-sm">
@@ -1608,7 +1718,7 @@ function CheckoutInner({
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
                       {isFreeShipping ? (
-                        <span className="text-green-600 font-extrabold text-base">🚚 GRATIS</span>
+                        <span className="text-green-600 font-extrabold text-base">🚚 GRATIS ✨</span>
                       ) : (
                         <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
                       )}
