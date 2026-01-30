@@ -11,6 +11,13 @@ import React, {
   Suspense,
 } from "react"
 import { useSearchParams } from "next/navigation"
+import { loadStripe, Stripe } from "@stripe/stripe-js"
+import {
+  Elements,
+  PaymentElement,
+  useStripe,
+  useElements,
+} from "@stripe/react-stripe-js"
 
 export const dynamic = "force-dynamic"
 
@@ -31,6 +38,7 @@ type CartSessionResponse = {
   subtotalCents?: number
   shippingCents?: number
   totalCents?: number
+  paymentIntentClientSecret?: string
   discountCodes?: { code: string }[]
   rawCart?: any
   shopDomain?: string
@@ -58,166 +66,6 @@ function formatMoney(cents: number | undefined, currency: string = "EUR") {
   }).format(value)
 }
 
-/**
- * Redsys inSite (iframe carta inline)
- * - Carica redsysV3.js
- * - Chiede parametri firmati al backend (insite-init)
- * - Renderizza iframe nel container
- * - Riceve idOper via callback globale storeIdOper
- */
-/**
- * Redsys inSite (iframe carta inline) - VERSIONE CORRETTA
- * 1) Chiama API per ottenere parametri firmati + scriptUrl
- * 2) Carica script Redsys dall'URL ricevuto (prod/test automatico)
- * 3) Renderizza iframe nel container
- * 4) Riceve idOper via callback globale
- */
-function RedsysInsite({
-  sessionId,
-  amountCents,
-  customerEmail,
-  onReadyToken,
-  onError,
-}: {
-  sessionId: string
-  amountCents: number
-  customerEmail: string
-  onReadyToken: (idOper: string) => void
-  onError: (msg: string) => void
-}) {
-  const [loading, setLoading] = useState(true)
-  const mountedRef = useRef(false)
-  const initializedRef = useRef(false) // ✅ Previene re-init multipli
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
-    // ✅ Skip se già inizializzato
-    if (initializedRef.current) {
-      console.log("⚠️ InSite già inizializzato, skip")
-      return
-    }
-    initializedRef.current = true
-
-    async function boot() {
-      try {
-        setLoading(true)
-
-        const initRes = await fetch("/api/redsys/insite-init", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents, email: customerEmail }),
-        })
-        const initData = await initRes.json()
-
-        if (!initRes.ok || !initData?.fuc) throw new Error(initData?.error || "Init fallito")
-
-        console.log("✅ Parametri:", initData.orderId)
-
-        // Carica script
-        await new Promise<void>((resolve, reject) => {
-          if (document.getElementById("redsys-v3")) {
-            console.log("ℹ️ Script già caricato")
-            return resolve()
-          }
-          
-          const s = document.createElement("script")
-          s.id = "redsys-v3"
-          s.src = initData.scriptUrl
-          s.async = true
-          s.onload = () => {
-            console.log("✅ Script caricato")
-            resolve()
-          }
-          s.onerror = () => reject(new Error("Script load error"))
-          document.body.appendChild(s)
-        })
-
-        // ✅ ASPETTA che getInSiteForm sia disponibile
-        let attempts = 0
-        while (attempts < 50) {
-          if ((window as any).getInSiteForm) {
-            console.log("✅ getInSiteForm disponibile")
-            break
-          }
-          await new Promise(r => setTimeout(r, 100))
-          attempts++
-        }
-
-        const win: any = window
-        
-        if (!win?.getInSiteForm) {
-          throw new Error("getInSiteForm timeout")
-        }
-
-        // Callbacks
-        win.storeIdOper = function(idOper: string) {
-          if (!mountedRef.current) return
-          console.log("✅ idOper:", idOper)
-          if (idOper?.length > 0) onReadyToken(idOper)
-        }
-
-        win.errorFunction = function(msg: string) {
-          if (!mountedRef.current) return
-          console.error("❌ Errore:", msg)
-          onError(msg || "Errore Redsys")
-        }
-
-        const container = document.getElementById("redsys_container")
-        if (container) container.innerHTML = ""
-
-        console.log("📝 Chiamata getInSiteForm")
-        
-        win.getInSiteForm(
-          'redsys_container',
-          '',
-          '',
-          '',
-          '',
-          'Pagar',
-          initData.fuc,
-          initData.terminal,
-          initData.orderId,
-          'IT',
-          true
-        )
-
-        if (mountedRef.current) setLoading(false)
-      } catch (e: any) {
-        console.error("❌ Errore:", e)
-        if (mountedRef.current) {
-          setLoading(false)
-          onError(e?.message || "Errore Redsys")
-        }
-      }
-    }
-
-    boot()
-  }, []) // ✅ Dipendenze VUOTE - esegue UNA volta sola
-
-  return (
-    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-      {loading && (
-        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-3">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent" />
-          <p className="text-sm text-blue-800 font-medium">
-            Inizializzo pagamento sicuro...
-          </p>
-        </div>
-      )}
-      <div id="redsys_container" />
-    </div>
-  )
-}
-
-
-
-
 function CheckoutInner({
   cart,
   sessionId,
@@ -225,9 +73,14 @@ function CheckoutInner({
   cart: CartSessionResponse
   sessionId: string
 }) {
+  const stripe = useStripe()
+  const elements = useElements()
+
   const cartUrl = useMemo(() => {
-    if (cart.shopDomain) return `https://${cart.shopDomain}/cart`
-    return "https://notforresale.it/cart"
+    if (cart.shopDomain) {
+      return `https://${cart.shopDomain}/cart`
+    }
+    return 'https://notforresale.it/cart'
   }, [cart.shopDomain])
 
   const [customer, setCustomer] = useState<CustomerForm>({
@@ -260,6 +113,7 @@ function CheckoutInner({
   const [success, setSuccess] = useState(false)
   const [calculatedShippingCents, setCalculatedShippingCents] = useState<number>(0)
   const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [shippingError, setShippingError] = useState<string | null>(null)
   const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(false)
 
@@ -269,9 +123,6 @@ function CheckoutInner({
   const addressInputRef = useRef<HTMLInputElement>(null)
   const autocompleteRef = useRef<any>(null)
   const scriptLoadedRef = useRef(false)
-
-  // 🔥 Redsys token (idOper) generato dall’iframe inSite
-  const [redsysIdOper, setRedsysIdOper] = useState<string | null>(null)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
@@ -291,8 +142,10 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  // ⚠️ come prima: spedizione flat 5,90
-  const totalToPayCents = subtotalCents - discountCents + 590
+  const SHIPPING_COST_CENTS = 590
+  const FREE_SHIPPING_THRESHOLD_CENTS = 5900  // 59€
+  const shippingToApply = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : SHIPPING_COST_CENTS
+  const totalToPayCents = subtotalCents - discountCents + shippingToApply
 
   const firstName = customer.fullName.split(" ")[0] || ""
   const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
@@ -300,9 +153,6 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // ---------------------------
-  // Google Places Autocomplete (invariato)
-  // ---------------------------
   useEffect(() => {
     let mounted = true
     const win = window as any
@@ -373,7 +223,7 @@ function CheckoutInner({
       if (autocompleteRef.current && win.google?.maps?.event) {
         try {
           win.google.maps.event.clearInstanceListeners(autocompleteRef.current)
-        } catch {}
+        } catch (e) {}
       }
     }
   }, [])
@@ -420,7 +270,7 @@ function CheckoutInner({
   }
 
   function isFormValid() {
-    const shippingValid =
+    const shippingValid = 
       customer.fullName.trim().length > 2 &&
       customer.email.trim().includes("@") &&
       customer.email.trim().length > 5 &&
@@ -444,10 +294,6 @@ function CheckoutInner({
     return shippingValid && billingValid
   }
 
-  // ---------------------------
-  // Calcolo spedizione (invariato: flat 5,90)
-  // + reset token reds/iframe se cambia hash (per sicurezza)
-  // ---------------------------
   useEffect(() => {
     async function calculateShipping() {
       const formHash = JSON.stringify({
@@ -467,18 +313,20 @@ function CheckoutInner({
 
       if (!isFormValid()) {
         setCalculatedShippingCents(0)
+        setClientSecret(null)
         setShippingError(null)
         setLastCalculatedHash("")
-        setRedsysIdOper(null)
         return
       }
 
-      if (formHash === lastCalculatedHash) {
-        // form invariato → non serve ricalcolare
+      if (formHash === lastCalculatedHash && clientSecret) {
+        console.log('[Checkout] 💾 Form invariato, riuso Payment Intent')
         return
       }
 
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
 
       debounceTimerRef.current = setTimeout(async () => {
         setIsCalculatingShipping(true)
@@ -486,17 +334,48 @@ function CheckoutInner({
         setShippingError(null)
 
         try {
-          const flatShippingCents = 590
+          const flatShippingCents = subtotalCents >= 5900 ? 0 : 590  // Spedizione gratuita sopra 59€
           setCalculatedShippingCents(flatShippingCents)
 
+          const shopifyTotal = typeof cart.totalCents === "number" ? cart.totalCents : subtotalCents
+          const currentDiscountCents = subtotalCents - shopifyTotal
+          const finalDiscountCents = currentDiscountCents > 0 ? currentDiscountCents : 0
+          const newTotalCents = subtotalCents - finalDiscountCents + flatShippingCents
+
+          console.log('[Checkout] 🆕 Creazione Payment Intent...')
+
+          const piRes = await fetch("/api/payment-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              amountCents: newTotalCents,
+              customer: {
+                fullName: customer.fullName,
+                email: customer.email,
+                phone: customer.phone,
+                address1: customer.address1,
+                address2: customer.address2,
+                city: customer.city,
+                postalCode: customer.postalCode,
+                province: customer.province,
+                countryCode: customer.countryCode || "IT",
+              },
+            }),
+          })
+
+          const piData = await piRes.json()
+
+          if (!piRes.ok || !piData.clientSecret) {
+            throw new Error(piData.error || "Errore creazione pagamento")
+          }
+
+          console.log('[Checkout] ✅ ClientSecret ricevuto')
+          setClientSecret(piData.clientSecret)
           setLastCalculatedHash(formHash)
-
-          // reset token (forza re-init iframe)
-          setRedsysIdOper(null)
-
           setIsCalculatingShipping(false)
         } catch (err: any) {
-          console.error("Errore calcolo:", err)
+          console.error("Errore creazione payment:", err)
           setShippingError(err.message || "Errore nel calcolo del totale")
           setIsCalculatingShipping(false)
         }
@@ -506,7 +385,9 @@ function CheckoutInner({
     calculateShipping()
 
     return () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
     }
   }, [
     customer.fullName,
@@ -525,9 +406,12 @@ function CheckoutInner({
     billingAddress.province,
     billingAddress.countryCode,
     useDifferentBilling,
+    sessionId,
     subtotalCents,
-    discountCents,
+    cart.totalCents,
+    clientSecret,
     lastCalculatedHash,
+    discountCents,
   ])
 
   async function handleSubmit(e: FormEvent) {
@@ -540,54 +424,74 @@ function CheckoutInner({
       return
     }
 
-    if (!redsysIdOper) {
-      setError("Inserisci i dati carta per continuare")
+    if (!stripe || !elements) {
+      setError("Stripe non pronto")
+      return
+    }
+
+    if (!clientSecret) {
+      setError("Payment Intent non creato")
       return
     }
 
     try {
       setLoading(true)
 
+      const { error: submitError } = await elements.submit()
+      if (submitError) {
+        console.error("Errore submit elements:", submitError)
+        setError(submitError.message || "Errore nella validazione")
+        setLoading(false)
+        return
+      }
+
       const finalBillingAddress = useDifferentBilling ? billingAddress : customer
 
-      const payRes = await fetch("/api/redsys/pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          amountCents: totalToPayCents,
-          idOper: redsysIdOper,
-          customer: {
-            fullName: customer.fullName,
-            email: customer.email,
-            phone: customer.phone,
-            address1: customer.address1,
-            address2: customer.address2,
-            city: customer.city,
-            postalCode: customer.postalCode,
-            province: customer.province,
-            countryCode: customer.countryCode || "IT",
-          },
-          billing: useDifferentBilling
-            ? {
-                fullName: finalBillingAddress.fullName,
-                email: finalBillingAddress.email || customer.email,
-                phone: finalBillingAddress.phone || customer.phone,
-                address1: finalBillingAddress.address1,
-                address2: finalBillingAddress.address2,
-                city: finalBillingAddress.city,
-                postalCode: finalBillingAddress.postalCode,
-                province: finalBillingAddress.province,
-                countryCode: finalBillingAddress.countryCode || "IT",
-              }
-            : null,
-        }),
-      })
+      const { error: stripeError } = await stripe.confirmPayment({
+  elements,
+  clientSecret,
 
-      const payData = await payRes.json()
+  confirmParams: {
+    return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
 
-      if (!payRes.ok || !payData?.ok) {
-        throw new Error(payData?.error || "Pagamento non riuscito")
+    payment_method_data: {
+      billing_details: {
+        name: finalBillingAddress.fullName || customer.fullName,
+        email: customer.email,
+        phone: finalBillingAddress.phone || customer.phone,
+
+        address: {
+          line1: finalBillingAddress.address1,
+          line2: finalBillingAddress.address2 || undefined,
+          city: finalBillingAddress.city,
+          postal_code: finalBillingAddress.postalCode,
+          state: finalBillingAddress.province,
+          country: finalBillingAddress.countryCode || "IT",
+        },
+      },
+
+      // 🔥 ANTIFRODE RADAR EXTRA
+      metadata: {
+        session_id: sessionId,
+        customer_fullName: customer.fullName,
+        customer_email: customer.email,
+        shipping_city: customer.city,
+        shipping_postal: customer.postalCode,
+        shipping_country: customer.countryCode,
+        checkout_type: "custom",
+      },
+    },
+  },
+
+  // 🔥 Obbliga 3DS se necessario
+  redirect: "if_required",
+})
+
+      if (stripeError) {
+        console.error("Stripe error:", stripeError)
+        setError(stripeError.message || "Pagamento non riuscito")
+        setLoading(false)
+        return
       }
 
       setSuccess(true)
@@ -595,24 +499,29 @@ function CheckoutInner({
 
       setTimeout(() => {
         window.location.href = `/thank-you?sessionId=${sessionId}`
-      }, 800)
+      }, 2000)
     } catch (err: any) {
       console.error("Errore pagamento:", err)
       setError(err.message || "Errore imprevisto")
       setLoading(false)
     }
   }
-
   return (
     <>
       <style jsx global>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+
         body {
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           background: #fafafa;
           color: #333333;
           -webkit-font-smoothing: antialiased;
         }
+
         .shopify-input {
           width: 100%;
           padding: 14px 16px;
@@ -626,12 +535,17 @@ function CheckoutInner({
           -webkit-appearance: none;
           appearance: none;
         }
+
         .shopify-input:focus {
           outline: none;
           border-color: #2C6ECB;
           box-shadow: 0 0 0 3px rgba(44, 110, 203, 0.1);
         }
-        .shopify-input::placeholder { color: #999999; }
+
+        .shopify-input::placeholder {
+          color: #999999;
+        }
+
         .shopify-label {
           display: block;
           font-size: 14px;
@@ -639,6 +553,7 @@ function CheckoutInner({
           color: #333333;
           margin-bottom: 8px;
         }
+
         .shopify-btn {
           width: 100%;
           padding: 18px 24px;
@@ -655,17 +570,23 @@ function CheckoutInner({
           appearance: none;
           touch-action: manipulation;
         }
+
         .shopify-btn:hover:not(:disabled) {
           background: linear-gradient(135deg, #1f5bb8 0%, #164a9e 100%);
           box-shadow: 0 6px 16px rgba(44, 110, 203, 0.4);
           transform: translateY(-2px);
         }
-        .shopify-btn:active:not(:disabled) { transform: translateY(0); }
+
+        .shopify-btn:active:not(:disabled) {
+          transform: translateY(0);
+        }
+
         .shopify-btn:disabled {
           background: #d1d5db;
           cursor: not-allowed;
           box-shadow: none;
         }
+
         .shopify-section {
           background: #ffffff;
           border: 1px solid #e5e7eb;
@@ -674,12 +595,14 @@ function CheckoutInner({
           margin-bottom: 20px;
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
+
         .shopify-section-title {
           font-size: 18px;
           font-weight: 600;
           color: #111827;
           margin-bottom: 20px;
         }
+
         .summary-toggle {
           background: #ffffff;
           border: 1px solid #e5e7eb;
@@ -693,7 +616,12 @@ function CheckoutInner({
           -webkit-tap-highlight-color: transparent;
           transition: all 0.2s ease;
         }
-        .summary-toggle:active { background: #f9fafb; transform: scale(0.98); }
+
+        .summary-toggle:active {
+          background: #f9fafb;
+          transform: scale(0.98);
+        }
+
         .summary-content {
           background: #ffffff;
           border: 1px solid #e5e7eb;
@@ -703,6 +631,7 @@ function CheckoutInner({
           margin-top: -20px;
           margin-bottom: 20px;
         }
+
         .pac-container {
           background-color: #ffffff !important;
           border: 1px solid #d9d9d9 !important;
@@ -713,6 +642,7 @@ function CheckoutInner({
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
           z-index: 9999 !important;
         }
+
         .pac-item {
           padding: 12px 16px !important;
           cursor: pointer !important;
@@ -721,17 +651,34 @@ function CheckoutInner({
           font-size: 14px !important;
           color: #333333 !important;
         }
-        .pac-item:hover { background-color: #f3f4f6 !important; }
-        .pac-icon { display: none !important; }
+
+        .pac-item:hover {
+          background-color: #f3f4f6 !important;
+        }
+
+        .pac-icon {
+          display: none !important;
+        }
+
         @media (max-width: 768px) {
-          .shopify-input { font-size: 16px !important; }
-          .shopify-btn { min-height: 52px; font-size: 16px; }
-          .shopify-section { padding: 20px; border-radius: 12px; }
+          .shopify-input {
+            font-size: 16px !important;
+          }
+          
+          .shopify-btn {
+            min-height: 52px;
+            font-size: 16px;
+          }
+
+          .shopify-section {
+            padding: 20px;
+            border-radius: 12px;
+          }
         }
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        {/* HEADER */}
+        {/* ✅ HEADER PREMIUM CON TRUST */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
@@ -740,41 +687,31 @@ function CheckoutInner({
                   src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
                   alt="Logo"
                   className="h-10"
-                  style={{ maxWidth: "160px" }}
+                  style={{ maxWidth: '160px' }}
                 />
               </a>
 
+              {/* Desktop Trust */}
               <div className="hidden md:flex items-center gap-6">
                 <div className="flex items-center gap-2 text-xs text-gray-600">
                   <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                      clipRule="evenodd"
-                    />
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                   </svg>
                   <span className="font-medium">SSL Sicuro</span>
                 </div>
 
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-full border border-emerald-200">
                   <svg className="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
+                    <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
                   <span className="text-xs font-semibold text-emerald-700">Pagamento Protetto</span>
                 </div>
               </div>
 
+              {/* Mobile Trust */}
               <div className="md:hidden flex items-center gap-2 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-200">
                 <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                    clipRule="evenodd"
-                  />
+                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                 </svg>
                 <span className="text-xs font-semibold text-emerald-700">Sicuro</span>
               </div>
@@ -782,18 +719,14 @@ function CheckoutInner({
           </div>
         </header>
 
-        {/* TRUST BANNER */}
+        {/* ✅ TRUST BANNER */}
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                      clipRule="evenodd"
-                    />
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -818,11 +751,7 @@ function CheckoutInner({
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                      clipRule="evenodd"
-                    />
+                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -834,11 +763,7 @@ function CheckoutInner({
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                      clipRule="evenodd"
-                    />
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -863,19 +788,17 @@ function CheckoutInner({
                 viewBox="0 0 16 16"
                 fill="none"
                 style={{
-                  transform: orderSummaryExpanded ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: "transform 0.2s ease",
+                  transform: orderSummaryExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s ease'
                 }}
               >
                 <path d="M4 6L8 10L12 6" stroke="#333" strokeWidth="2" strokeLinecap="round" />
               </svg>
               <span className="text-sm font-medium text-blue-600">
-                {orderSummaryExpanded ? "Nascondi" : "Mostra"} riepilogo ordine
+                {orderSummaryExpanded ? 'Nascondi' : 'Mostra'} riepilogo ordine
               </span>
             </div>
-            <span className="text-base font-semibold">
-              {formatMoney(totalToPayCents, currency)}
-            </span>
+            <span className="text-base font-semibold">{formatMoney(totalToPayCents, currency)}</span>
           </div>
 
           {orderSummaryExpanded && (
@@ -896,9 +819,7 @@ function CheckoutInner({
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {item.title}
-                      </p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
                       {item.variantTitle && (
                         <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
                       )}
@@ -925,9 +846,7 @@ function CheckoutInner({
 
                 <div className="flex justify-between">
                   <span className="text-gray-600">Spedizione</span>
-                  <span className="text-gray-900">
-                    {shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}
-                  </span>
+                  <span className="text-gray-900">{subtotalCents >= 5900 && calculatedShippingCents === 0 ? "Gratis" : (calculatedShippingCents > 0 ? formatMoney(calculatedShippingCents, currency) : formatMoney(590, currency))}</span>
                 </div>
 
                 <div className="flex justify-between text-base font-semibold pt-3 border-t border-gray-200">
@@ -941,12 +860,13 @@ function CheckoutInner({
 
         <div className="max-w-6xl mx-auto px-4 pb-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
+            
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
-                {/* CONTATTI */}
+
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
-
+                  
                   <div>
                     <label className="shopify-label">Email</label>
                     <input
@@ -962,17 +882,20 @@ function CheckoutInner({
                   </div>
 
                   <div className="flex items-start gap-2 mt-4">
-                    <input type="checkbox" id="emailUpdates" className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" />
+                    <input 
+                      type="checkbox" 
+                      id="emailUpdates" 
+                      className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
+                    />
                     <label htmlFor="emailUpdates" className="text-xs text-gray-600 leading-relaxed">
                       Inviami email con notizie e offerte
                     </label>
                   </div>
                 </div>
 
-                {/* CONSEGNA */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
-
+                  
                   <div className="space-y-4">
                     <div>
                       <label className="shopify-label">Paese / Regione</label>
@@ -998,9 +921,9 @@ function CheckoutInner({
                           name="firstName"
                           value={firstName}
                           onChange={(e) => {
-                            setCustomer((prev) => ({
+                            setCustomer(prev => ({
                               ...prev,
-                              fullName: `${e.target.value} ${lastName}`.trim(),
+                              fullName: `${e.target.value} ${lastName}`.trim()
                             }))
                           }}
                           className="shopify-input"
@@ -1017,9 +940,9 @@ function CheckoutInner({
                           name="lastName"
                           value={lastName}
                           onChange={(e) => {
-                            setCustomer((prev) => ({
+                            setCustomer(prev => ({
                               ...prev,
-                              fullName: `${firstName} ${e.target.value}`.trim(),
+                              fullName: `${firstName} ${e.target.value}`.trim()
                             }))
                           }}
                           className="shopify-input"
@@ -1032,7 +955,12 @@ function CheckoutInner({
 
                     <div>
                       <label className="shopify-label">Azienda (facoltativo)</label>
-                      <input type="text" className="shopify-input" placeholder="Nome azienda" autoComplete="organization" />
+                      <input
+                        type="text"
+                        className="shopify-input"
+                        placeholder="Nome azienda"
+                        autoComplete="organization"
+                      />
                     </div>
 
                     <div>
@@ -1122,7 +1050,11 @@ function CheckoutInner({
                     </div>
 
                     <div className="flex items-start gap-2">
-                      <input type="checkbox" id="saveInfo" className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" />
+                      <input 
+                        type="checkbox" 
+                        id="saveInfo" 
+                        className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
+                      />
                       <label htmlFor="saveInfo" className="text-xs text-gray-600 leading-relaxed">
                         Salva questi dati per la prossima volta
                       </label>
@@ -1130,14 +1062,13 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* BILLING */}
                 <div className="flex items-start gap-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                  <input
-                    type="checkbox"
-                    id="differentBilling"
+                  <input 
+                    type="checkbox" 
+                    id="differentBilling" 
                     checked={useDifferentBilling}
                     onChange={(e) => setUseDifferentBilling(e.target.checked)}
-                    className="w-4 h-4 mt-0.5 flex-shrink-0 rounded"
+                    className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
                   />
                   <label htmlFor="differentBilling" className="text-sm text-gray-700 leading-relaxed cursor-pointer font-medium">
                     Usa un indirizzo di fatturazione diverso
@@ -1147,13 +1078,13 @@ function CheckoutInner({
                 {useDifferentBilling && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Fatturazione</h2>
-
+                    
                     <div className="space-y-4">
                       <div>
                         <label className="shopify-label">Paese / Regione</label>
                         <select
                           value={billingAddress.countryCode}
-                          onChange={(e) => setBillingAddress((prev) => ({ ...prev, countryCode: e.target.value }))}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, countryCode: e.target.value }))}
                           className="shopify-input"
                           required
                         >
@@ -1171,9 +1102,9 @@ function CheckoutInner({
                             type="text"
                             value={billingFirstName}
                             onChange={(e) => {
-                              setBillingAddress((prev) => ({
+                              setBillingAddress(prev => ({
                                 ...prev,
-                                fullName: `${e.target.value} ${billingLastName}`.trim(),
+                                fullName: `${e.target.value} ${billingLastName}`.trim()
                               }))
                             }}
                             className="shopify-input"
@@ -1187,9 +1118,9 @@ function CheckoutInner({
                             type="text"
                             value={billingLastName}
                             onChange={(e) => {
-                              setBillingAddress((prev) => ({
+                              setBillingAddress(prev => ({
                                 ...prev,
-                                fullName: `${billingFirstName} ${e.target.value}`.trim(),
+                                fullName: `${billingFirstName} ${e.target.value}`.trim()
                               }))
                             }}
                             className="shopify-input"
@@ -1203,7 +1134,7 @@ function CheckoutInner({
                         <input
                           type="text"
                           value={billingAddress.address1}
-                          onChange={(e) => setBillingAddress((prev) => ({ ...prev, address1: e.target.value }))}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, address1: e.target.value }))}
                           className="shopify-input"
                           required
                         />
@@ -1214,7 +1145,7 @@ function CheckoutInner({
                         <input
                           type="text"
                           value={billingAddress.address2}
-                          onChange={(e) => setBillingAddress((prev) => ({ ...prev, address2: e.target.value }))}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, address2: e.target.value }))}
                           className="shopify-input"
                         />
                       </div>
@@ -1225,7 +1156,7 @@ function CheckoutInner({
                           <input
                             type="text"
                             value={billingAddress.postalCode}
-                            onChange={(e) => setBillingAddress((prev) => ({ ...prev, postalCode: e.target.value }))}
+                            onChange={(e) => setBillingAddress(prev => ({ ...prev, postalCode: e.target.value }))}
                             className="shopify-input"
                             required
                           />
@@ -1236,7 +1167,7 @@ function CheckoutInner({
                           <input
                             type="text"
                             value={billingAddress.city}
-                            onChange={(e) => setBillingAddress((prev) => ({ ...prev, city: e.target.value }))}
+                            onChange={(e) => setBillingAddress(prev => ({ ...prev, city: e.target.value }))}
                             className="shopify-input"
                             required
                           />
@@ -1248,7 +1179,7 @@ function CheckoutInner({
                         <input
                           type="text"
                           value={billingAddress.province}
-                          onChange={(e) => setBillingAddress((prev) => ({ ...prev, province: e.target.value }))}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, province: e.target.value }))}
                           className="shopify-input"
                           required
                         />
@@ -1257,7 +1188,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* SPEDIZIONE */}
                 {isFormValid() && (
                   <>
                     <div className="shopify-section">
@@ -1271,7 +1201,7 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* SOCIAL PROOF */}
+                    {/* ✅ SOCIAL PROOF */}
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex -space-x-3">
@@ -1314,11 +1244,10 @@ function CheckoutInner({
                   </>
                 )}
 
-                {/* PAGAMENTO */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
-
-                  {/* METODI */}
+                  
+                  {/* ✅ METODI PAGAMENTO */}
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
@@ -1343,35 +1272,23 @@ function CheckoutInner({
                     </div>
                   </div>
 
-                  {/* SICUREZZA */}
+                  {/* ✅ SICUREZZA ROW */}
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">SSL</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">3D Secure</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">PCI DSS</span>
                     </div>
@@ -1380,21 +1297,12 @@ function CheckoutInner({
                   <p className="text-xs text-gray-600 mb-4">
                     🔒 I tuoi dati non vengono mai memorizzati. Transazione protetta.
                   </p>
-
+                  
                   {isCalculatingShipping && (
                     <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                      <svg
-                        className="animate-spin h-4 w-4 text-blue-600"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
+                      <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
                       <p className="text-sm text-blue-800 font-medium">Calcolo in corso...</p>
                     </div>
@@ -1406,28 +1314,36 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* ✅ BLOCCO CARTA REDSYS INLINE */}
-                  {isFormValid() && !isCalculatingShipping ? (
-                    <RedsysInsite
-                      sessionId={sessionId}
-                      amountCents={totalToPayCents}
-                      customerEmail={customer.email}
-                      onReadyToken={(idOper) => setRedsysIdOper(idOper)}
-                      onError={(msg) => setError(msg)}
-                    />
-                  ) : (
+                  {clientSecret && !isCalculatingShipping && (
+                    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
+                      <PaymentElement 
+                        options={{
+                          fields: {
+                            billingDetails: {
+                              name: 'auto',
+                              email: 'never',
+                              phone: 'never',
+                              address: 'never'
+                            }
+                          },
+                          defaultValues: {
+                            billingDetails: {
+                              name: useDifferentBilling 
+                                ? billingAddress.fullName 
+                                : customer.fullName
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {!clientSecret && !isCalculatingShipping && (
                     <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
                       <p className="text-sm text-gray-600 text-center">
                         Compila tutti i campi per visualizzare i metodi di pagamento
                       </p>
                     </div>
-                  )}
-
-                  {/* piccolo hint */}
-                  {isFormValid() && !isCalculatingShipping && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      {redsysIdOper ? "✅ Dati carta pronti" : "Inserisci i dati carta per abilitare il pagamento"}
-                    </p>
                   )}
                 </div>
 
@@ -1435,11 +1351,7 @@ function CheckoutInner({
                   <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
                     <div className="flex items-start gap-3">
                       <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                       </svg>
                       <p className="text-sm text-red-700 font-medium">{error}</p>
                     </div>
@@ -1450,11 +1362,7 @@ function CheckoutInner({
                   <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
                     <div className="flex items-start gap-3">
                       <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                       <p className="text-sm text-green-700 font-medium">Pagamento completato! Reindirizzamento...</p>
                     </div>
@@ -1463,50 +1371,33 @@ function CheckoutInner({
 
                 <button
                   type="submit"
-                  disabled={
-                    loading ||
-                    !isFormValid() ||
-                    isCalculatingShipping ||
-                    !redsysIdOper
-                  }
+                  disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
                   className="shopify-btn"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
                       <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
                       Elaborazione...
                     </span>
                   ) : (
                     <span className="flex items-center justify-center gap-2">
                       <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                       </svg>
                       Paga in sicurezza
                     </span>
                   )}
                 </button>
 
-                {/* GARANZIE FINALI (invariate) */}
+                {/* ✅ GARANZIE FINALI */}
                 <div className="mt-6 space-y-3">
                   <div className="flex items-start gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
                     <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                     </div>
                     <div className="flex-1">
@@ -1550,16 +1441,15 @@ function CheckoutInner({
                 <div className="mt-4 text-center">
                   <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
                     <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path
-                        fillRule="evenodd"
-                        d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                        clipRule="evenodd"
-                      />
+                      <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                     </svg>
                     <span>Crittografia SSL a 256-bit</span>
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">Powered by Redsys • 3D Secure</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Powered by Stripe • PCI DSS Level 1 Certified
+                  </p>
                 </div>
+
               </form>
             </div>
 
@@ -1612,7 +1502,7 @@ function CheckoutInner({
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">{shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}</span>
+                      <span className="text-gray-900 font-medium">{subtotalCents >= 5900 && calculatedShippingCents === 0 ? "Gratis" : (calculatedShippingCents > 0 ? formatMoney(calculatedShippingCents, currency) : formatMoney(590, currency))}</span>
                     </div>
 
                     <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
@@ -1631,8 +1521,7 @@ function CheckoutInner({
   )
 }
 
-// ---- Page wrapper (niente Stripe)
-// carica solo cart-session e poi renderizza CheckoutInner
+// Rest of the file (CheckoutPageContent, export default) remains exactly the same...
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""
@@ -1640,6 +1529,7 @@ function CheckoutPageContent() {
   const [cart, setCart] = useState<CartSessionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -1653,20 +1543,50 @@ function CheckoutPageContent() {
         setLoading(true)
         setError(null)
 
-        const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
+        const res = await fetch(
+          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
+        )
         const data: CartSessionResponse & { error?: string } = await res.json()
 
         if (!res.ok || (data as any).error) {
-          setError(data.error || "Errore nel recupero del carrello. Riprova dal sito.")
+          setError(
+            data.error || "Errore nel recupero del carrello. Riprova dal sito.",
+          )
           setLoading(false)
           return
         }
 
         setCart(data)
+
+        try {
+          const pkRes = await fetch('/api/stripe-status')
+          
+          if (!pkRes.ok) {
+            throw new Error('API stripe-status non disponibile')
+          }
+          
+          const pkData = await pkRes.json()
+
+          if (pkData.publishableKey) {
+            console.log('[Checkout] ✅ Publishable key caricata')
+            console.log('[Checkout] ✅ Account:', pkData.accountLabel)
+            setStripePromise(loadStripe(pkData.publishableKey))
+          } else {
+            throw new Error('PublishableKey non ricevuta da API')
+          }
+        } catch (err) {
+          console.error('[Checkout] ❌ Errore caricamento stripe-status:', err)
+          setError('Impossibile inizializzare il sistema di pagamento. Riprova.')
+          setLoading(false)
+          return
+        }
+
         setLoading(false)
       } catch (err: any) {
         console.error("Errore checkout:", err)
-        setError(err?.message || "Errore imprevisto nel caricamento del checkout.")
+        setError(
+          err?.message || "Errore imprevisto nel caricamento del checkout.",
+        )
         setLoading(false)
       }
     }
@@ -1674,7 +1594,7 @@ function CheckoutPageContent() {
     load()
   }, [sessionId])
 
-  if (loading) {
+  if (loading || !stripePromise) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
@@ -1694,13 +1614,39 @@ function CheckoutPageContent() {
           </svg>
           <h1 className="text-xl font-bold text-gray-900">Impossibile caricare il checkout</h1>
           <p className="text-sm text-gray-600">{error}</p>
-          <p className="text-xs text-gray-500">Ritorna al sito e riprova ad aprire il checkout.</p>
+          <p className="text-xs text-gray-500">
+            Ritorna al sito e riprova ad aprire il checkout.
+          </p>
         </div>
       </div>
     )
   }
 
-  return <CheckoutInner cart={cart} sessionId={sessionId} />
+  const options = {
+    mode: 'payment' as const,
+    amount: 1000,
+    currency: (cart.currency || 'eur').toLowerCase(),
+    paymentMethodTypes: ['card'],
+    appearance: {
+      theme: "stripe" as const,
+      variables: {
+        colorPrimary: "#2C6ECB",
+        colorBackground: "#ffffff",
+        colorText: "#333333",
+        colorDanger: "#df1b41",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        spacingUnit: '4px',
+        borderRadius: "10px",
+        fontSizeBase: '16px',
+      },
+    },
+  }
+
+  return (
+    <Elements stripe={stripePromise} options={options}>
+      <CheckoutInner cart={cart} sessionId={sessionId} />
+    </Elements>
+  )
 }
 
 export default function CheckoutPage() {

@@ -1,7 +1,9 @@
 // src/app/api/cart-session/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { randomUUID } from "crypto"
+import Stripe from "stripe"
 import { db } from "@/lib/firebaseAdmin"
+import { getConfig } from "@/lib/config"
 
 const COLLECTION = "cartSessions"
 
@@ -115,6 +117,37 @@ export async function POST(req: NextRequest) {
     const currency = (cart.currency || "EUR").toString().toUpperCase()
     const sessionId = randomUUID()
 
+    const cfg = await getConfig()
+    const firstStripe =
+      (cfg.stripeAccounts || []).find((a: any) => a.secretKey) || null
+    const secretKey =
+      firstStripe?.secretKey || process.env.STRIPE_SECRET_KEY || ""
+
+    if (!secretKey) {
+      console.error("[cart-session POST] Nessuna Stripe secret key configurata")
+      return new NextResponse(
+        JSON.stringify({ error: "Configurazione Stripe mancante" }),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders(origin),
+          },
+        },
+      )
+    }
+
+    const stripe = new Stripe(secretKey)
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: totalCents,
+      currency: currency.toLowerCase(),
+      payment_method_types: ["card"],
+      metadata: {
+        sessionId,
+      },
+    })
+
     // ✅ Costruisci cartId da token
     const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
 
@@ -126,16 +159,15 @@ export async function POST(req: NextRequest) {
       subtotalCents,
       shippingCents,
       totalCents,
-      paymentMethod: "redsys", // ✅ Solo Redsys
+      paymentIntentId: paymentIntent.id,
+      paymentIntentClientSecret: paymentIntent.client_secret,
       rawCart: {
         ...cart,
-        id: cartId,
+        id: cartId  // ✅ Aggiungi id costruito
       },
     }
 
     await db.collection(COLLECTION).doc(sessionId).set(docData)
-
-    console.log("✅ Cart session created:", sessionId)
 
     return new NextResponse(
       JSON.stringify({
@@ -145,6 +177,7 @@ export async function POST(req: NextRequest) {
         subtotalCents,
         shippingCents,
         totalCents,
+        paymentIntentClientSecret: paymentIntent.client_secret,
       }),
       {
         status: 200,
@@ -233,6 +266,7 @@ export async function GET(req: NextRequest) {
         subtotalCents,
         shippingCents,
         totalCents,
+        paymentIntentClientSecret: data.paymentIntentClientSecret || null,
         rawCart: data.rawCart || null,
         shopifyOrderNumber: data.shopifyOrderNumber,
         shopifyOrderId: data.shopifyOrderId,
