@@ -227,7 +227,7 @@ async function sendMetaPurchaseEvent({
       return data ? crypto.createHash('sha256').update(data.toLowerCase().trim()).digest('hex') : undefined
     }
 
-    const eventId = paymentIntent.id // ← Stesso ID del client per deduplication
+    const eventId = paymentIntent.id
     const eventTime = Math.floor(Date.now() / 1000)
 
     const userData: any = {
@@ -248,16 +248,18 @@ async function sendMetaPurchaseEvent({
     if (customer.fullName) {
       const nameParts = customer.fullName.split(' ')
       if (nameParts[0]) userData.fn = hashData(nameParts[0])
-      if (nameParts[1]) userData.ln = hashData(nameParts.slice(1).join(' '))
+      if (nameParts.length > 1) userData.ln = hashData(nameParts.slice(1).join(' '))
     }
     if (customer.city) {
       userData.ct = hashData(customer.city)
     }
     if (customer.postalCode) {
-      userData.zp = customer.postalCode.replace(/\s/g, '').toLowerCase()
+      const cleanZip = customer.postalCode.replace(/\s/g, '').toLowerCase()
+      userData.zp = hashData(cleanZip)
     }
     if (customer.countryCode) {
-      userData.country = customer.countryCode.toLowerCase()
+      const cleanCountry = customer.countryCode.toLowerCase().substring(0, 2)
+      userData.country = hashData(cleanCountry)
     }
 
     // ✅ COOKIE Meta (se disponibili)
@@ -290,7 +292,7 @@ async function sendMetaPurchaseEvent({
       data: [{
         event_name: 'Purchase',
         event_time: eventTime,
-        event_id: eventId, // ← DEDUPLICATION con client-side
+        event_id: eventId,
         event_source_url: `https://nfrcheckout.com/thank-you?sessionId=${sessionId}`,
         action_source: 'website',
         user_data: userData,
@@ -315,8 +317,9 @@ async function sendMetaPurchaseEvent({
 
     if (response.ok && result.events_received > 0) {
       console.log('[stripe-webhook] ✅ Meta CAPI Purchase inviato con successo')
-      console.log('[stripe-webhook] Event ID:', eventId)
-      console.log('[stripe-webhook] Events received:', result.events_received)
+      console.log('[stripe-webhook] 📊 Event ID:', eventId)
+      console.log('[stripe-webhook] 📊 Events received:', result.events_received)
+      console.log('[stripe-webhook] 🎯 FBTRACE ID:', result.fbtrace_id)
     } else {
       console.error('[stripe-webhook] ❌ Errore Meta CAPI:', result)
     }
@@ -620,3 +623,4 @@ async function clearShopifyCart(cartId: string, config: any) {
     console.error("[clearShopifyCart] ❌ Errore:", error.message)
   }
 }
+
