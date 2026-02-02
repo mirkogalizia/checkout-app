@@ -11,6 +11,7 @@ import React, {
   Suspense,
 } from "react"
 import { useSearchParams } from "next/navigation"
+import Script from "next/script"
 import { loadStripe, Stripe } from "@stripe/stripe-js"
 import {
   Elements,
@@ -39,6 +40,7 @@ type CartSessionResponse = {
   shippingCents?: number
   totalCents?: number
   paymentIntentClientSecret?: string
+  paymentIntentId?: string
   discountCodes?: { code: string }[]
   rawCart?: any
   shopDomain?: string
@@ -116,6 +118,7 @@ function CheckoutInner({
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [shippingError, setShippingError] = useState<string | null>(null)
   const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(false)
+  const [fbPixelSent, setFbPixelSent] = useState(false)
 
   const [lastCalculatedHash, setLastCalculatedHash] = useState<string>("")
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -142,9 +145,9 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
+  // ✅ SEMPRE SPEDIZIONE FISSA A 5.90€
   const SHIPPING_COST_CENTS = 590
-  const FREE_SHIPPING_THRESHOLD_CENTS = 5900
-  const shippingToApply = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : SHIPPING_COST_CENTS
+  const shippingToApply = SHIPPING_COST_CENTS
   const totalToPayCents = subtotalCents - discountCents + shippingToApply
 
   const firstName = customer.fullName.split(" ")[0] || ""
@@ -153,7 +156,49 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  const isFreeShipping = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS
+  // ✅ FACEBOOK PIXEL - INITIATE CHECKOUT (TRACKING CHECKOUT ABBANDONATI)
+  useEffect(() => {
+    if (fbPixelSent) return
+
+    const sendFBPixel = () => {
+      if (typeof window !== 'undefined' && (window as any).fbq && cart.items.length > 0) {
+        console.log('[Checkout] 📊 Invio Facebook Pixel InitiateCheckout...')
+        
+        const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
+        const eventId = cart.paymentIntentId || sessionId
+        
+        ;(window as any).fbq('track', 'InitiateCheckout', {
+          value: totalToPayCents / 100,
+          currency: currency,
+          content_ids: contentIds,
+          content_type: 'product',
+          num_items: cart.items.reduce((sum, item) => sum + item.quantity, 0),
+        }, { eventID: eventId })
+
+        console.log('[Checkout] ✅ Facebook Pixel InitiateCheckout inviato')
+        console.log('[Checkout] Event ID:', eventId)
+        console.log('[Checkout] Value:', totalToPayCents / 100, currency)
+        
+        setFbPixelSent(true)
+      }
+    }
+
+    // Prova subito se fbq è già disponibile
+    if ((window as any).fbq) {
+      sendFBPixel()
+    } else {
+      // Aspetta che fbq sia pronto
+      const checkFbq = setInterval(() => {
+        if ((window as any).fbq) {
+          clearInterval(checkFbq)
+          sendFBPixel()
+        }
+      }, 100)
+
+      // Timeout dopo 5 secondi
+      setTimeout(() => clearInterval(checkFbq), 5000)
+    }
+  }, [fbPixelSent, cart.items, totalToPayCents, currency, sessionId, cart.paymentIntentId])
 
   useEffect(() => {
     let mounted = true
@@ -336,7 +381,7 @@ function CheckoutInner({
         setShippingError(null)
 
         try {
-          const flatShippingCents = subtotalCents >= 5900 ? 0 : 590
+          const flatShippingCents = 590 // ✅ SEMPRE 5.90€
           setCalculatedShippingCents(flatShippingCents)
 
           const shopifyTotal = typeof cart.totalCents === "number" ? cart.totalCents : subtotalCents
@@ -509,6 +554,31 @@ function CheckoutInner({
 
   return (
     <>
+      {/* ✅ FACEBOOK PIXEL */}
+      <Script id="facebook-pixel" strategy="afterInteractive">
+        {`
+          !function(f,b,e,v,n,t,s)
+          {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+          n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+          if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+          n.queue=[];t=b.createElement(e);t.async=!0;
+          t.src=v;s=b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t,s)}(window, document,'script',
+          'https://connect.facebook.net/en_US/fbevents.js');
+          fbq('init', '3891846021132542');
+          fbq('track', 'PageView');
+          console.log('[Checkout] ✅ Facebook Pixel inizializzato');
+        `}
+      </Script>
+      <noscript>
+        <img 
+          height="1" 
+          width="1" 
+          style={{ display: 'none' }}
+          src="https://www.facebook.com/tr?id=3891846021132542&ev=PageView&noscript=1"
+        />
+      </noscript>
+
       <style jsx global>{`
         * {
           box-sizing: border-box;
@@ -772,30 +842,7 @@ function CheckoutInner({
           </div>
         </div>
 
-        {isFreeShipping && (
-          <div className="max-w-6xl mx-auto px-4 mb-6">
-            <div className="bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-400 rounded-2xl p-5 shadow-xl">
-              <div className="flex items-center gap-4">
-                <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center shadow-lg">
-                  <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <p className="text-lg md:text-xl font-extrabold text-gray-900 mb-1 flex items-center gap-2 flex-wrap">
-                    🎊 COMPLIMENTI! SPEDIZIONE GRATUITA ATTIVATA!
-                    <span className="inline-block px-3 py-1 bg-green-600 text-white text-sm rounded-full font-bold shadow-md">
-                      RISPARMI €5,90
-                    </span>
-                  </p>
-                  <p className="text-sm text-gray-700 font-medium">
-                    Il tuo ordine supera i 59€ e ricevi la spedizione GRATIS 🚚✨
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ✅ RIMOSSO BANNER SPEDIZIONE GRATUITA */}
 
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
@@ -824,7 +871,7 @@ function CheckoutInner({
 
           {orderSummaryExpanded && (
             <div className="summary-content">
-              {(discountCents > 0 || isFreeShipping) && (
+              {discountCents > 0 && (
                 <div className="mb-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl shadow-md">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
@@ -836,23 +883,15 @@ function CheckoutInner({
                     <h3 className="text-base font-bold text-gray-900">🎉 Stai Risparmiando!</h3>
                   </div>
                   <div className="space-y-2">
-                    {discountCents > 0 && (
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-700 font-medium">💸 Sconto Prodotti</span>
-                        <span className="text-lg font-bold text-green-600">-{formatMoney(discountCents, currency)}</span>
-                      </div>
-                    )}
-                    {isFreeShipping && (
-                      <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-700 font-medium">🚚 Spedizione Gratuita</span>
-                        <span className="text-lg font-bold text-green-600">-€5,90</span>
-                      </div>
-                    )}
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-700 font-medium">💸 Sconto Prodotti</span>
+                      <span className="text-lg font-bold text-green-600">-{formatMoney(discountCents, currency)}</span>
+                    </div>
                     <div className="pt-2 border-t-2 border-green-300 mt-2">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-bold text-gray-900">Risparmio Totale</span>
                         <span className="text-xl font-extrabold text-green-600">
-                          -{formatMoney(discountCents + (isFreeShipping ? 590 : 0), currency)}
+                          -{formatMoney(discountCents, currency)}
                         </span>
                       </div>
                     </div>
@@ -961,11 +1000,7 @@ function CheckoutInner({
 
                 <div className="flex justify-between">
                   <span className="text-gray-600">Spedizione</span>
-                  {isFreeShipping ? (
-                    <span className="text-green-600 font-bold text-base">🚚 GRATIS</span>
-                  ) : (
-                    <span className="text-gray-900">{formatMoney(shippingToApply, currency)}</span>
-                  )}
+                  <span className="text-gray-900">{formatMoney(shippingToApply, currency)}</span>
                 </div>
 
                 <div className="flex justify-between text-base font-semibold pt-3 border-t border-gray-200">
@@ -1580,7 +1615,7 @@ function CheckoutInner({
                 <div className="shopify-section">
                   <h3 className="shopify-section-title">Riepilogo ordine</h3>
 
-                  {(discountCents > 0 || isFreeShipping) && (
+                  {discountCents > 0 && (
                     <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl shadow-lg">
                       <div className="flex items-center gap-3 mb-4">
                         <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center shadow-md">
@@ -1592,23 +1627,15 @@ function CheckoutInner({
                         <h3 className="text-lg font-extrabold text-gray-900">🎉 Stai Risparmiando!</h3>
                       </div>
                       <div className="space-y-3">
-                        {discountCents > 0 && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-700 font-semibold">💸 Sconto Prodotti</span>
-                            <span className="text-xl font-extrabold text-green-600">-{formatMoney(discountCents, currency)}</span>
-                          </div>
-                        )}
-                        {isFreeShipping && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-700 font-semibold">🚚 Spedizione Gratuita</span>
-                            <span className="text-xl font-extrabold text-green-600">-€5,90</span>
-                          </div>
-                        )}
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-700 font-semibold">💸 Sconto Prodotti</span>
+                          <span className="text-xl font-extrabold text-green-600">-{formatMoney(discountCents, currency)}</span>
+                        </div>
                         <div className="pt-3 border-t-2 border-green-400 mt-3">
                           <div className="flex justify-between items-center">
                             <span className="text-base font-extrabold text-gray-900">Risparmio Totale</span>
                             <span className="text-2xl font-black text-green-600">
-                              -{formatMoney(discountCents + (isFreeShipping ? 590 : 0), currency)}
+                              -{formatMoney(discountCents, currency)}
                             </span>
                           </div>
                         </div>
@@ -1717,11 +1744,7 @@ function CheckoutInner({
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      {isFreeShipping ? (
-                        <span className="text-green-600 font-extrabold text-base">🚚 GRATIS ✨</span>
-                      ) : (
-                        <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
-                      )}
+                      <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
                     </div>
 
                     <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
@@ -1883,4 +1906,5 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
+
 
