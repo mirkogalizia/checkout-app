@@ -104,11 +104,18 @@ function ThankYouContent() {
             const orderTotal = (total + shipping) / 100
             const orderId = data.shopifyOrderNumber || data.shopifyOrderId || sessionId
             
-            ;(window as any).gtag('event', 'conversion', {
-              'send_to': 'AW-17391033186/G-u0CLKyxbsbEOK22ORA',
+            // ✅ Evento purchase standard - Google lo associa automaticamente
+            ;(window as any).gtag('event', 'purchase', {
+              'send_to': 'AW-17925038279',
               'value': orderTotal,
               'currency': data.currency || 'EUR',
-              'transaction_id': orderId
+              'transaction_id': orderId,
+              'items': (data.items || []).map((item: any) => ({
+                'id': item.id || item.variant_id,
+                'name': item.title,
+                'quantity': item.quantity,
+                'price': ((item.priceCents || 0) / 100)
+              }))
             })
 
             console.log('[ThankYou] ✅ Google Ads Purchase inviato')
@@ -219,9 +226,9 @@ function ThankYouContent() {
 
   return (
     <>
-      {/* ✅ GOOGLE TAG (GTAG.JS) */}
+      {/* ✅ GOOGLE TAG (GTAG.JS) - AW-17925038279 */}
       <Script
-        src="https://www.googletagmanager.com/gtag/js?id=AW-17391033186"
+        src="https://www.googletagmanager.com/gtag/js?id=AW-17925038279"
         strategy="afterInteractive"
       />
       <Script
@@ -232,8 +239,8 @@ function ThankYouContent() {
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'AW-17391033186');
-            console.log('[ThankYou] ✅ Google Tag inizializzato');
+            gtag('config', 'AW-17925038279');
+            console.log('[ThankYou] ✅ Google Tag inizializzato - AW-17925038279');
           `,
         }}
       />
@@ -463,3 +470,4 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
+
