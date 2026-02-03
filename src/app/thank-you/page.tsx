@@ -38,7 +38,7 @@ function ThankYouContent() {
   const [cartCleared, setCartCleared] = useState(false)
 
   useEffect(() => {
-    async function loadOrderDataAndClearCart() {
+    async function loadOrderAndCreateShopifyOrder() {
       if (!sessionId) {
         setError("Sessione non valida")
         setLoading(false)
@@ -46,6 +46,7 @@ function ThankYouContent() {
       }
 
       try {
+        // 1. CARICA I DATI DEL CARRELLO
         const res = await fetch(`/api/cart-session?sessionId=${sessionId}`)
         const data = await res.json()
 
@@ -53,19 +54,46 @@ function ThankYouContent() {
           throw new Error(data.error || "Errore caricamento ordine")
         }
 
+        console.log('[ThankYou] 📦 Dati carrello ricevuti:', data)
+
+        // 2. ✅ CREA ORDINE SHOPIFY (QUI ERA IL PROBLEMA!)
+        console.log('[ThankYou] 🛒 Creazione ordine Shopify...')
+        const createOrderRes = await fetch('/api/shopify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        })
+
+        const orderResult = await createOrderRes.json()
+
+        if (!createOrderRes.ok) {
+          console.error('[ThankYou] ⚠️ Errore creazione ordine:', orderResult.error)
+          // NON bloccare, mostra comunque la thank you
+        } else {
+          console.log('[ThankYou] ✅ Ordine Shopify creato:', orderResult.orderNumber)
+        }
+
+        // 3. CALCOLA I TOTALI CORRETTI
         const subtotal = data.subtotalCents || 0
-        const total = data.totalCents || 0
-        const shipping = data.shippingCents || 590
-        const discount = subtotal > 0 && total > 0 ? subtotal - (total - shipping) : 0
+        const shipping = 590 // SEMPRE 5.90€
+        
+        // Calcola sconto dai dati Shopify
+        let discount = 0
+        if (data.totalCents && data.totalCents > 0) {
+          discount = subtotal - data.totalCents
+          if (discount < 0) discount = 0
+        }
+
+        const total = subtotal - discount + shipping
 
         const processedOrderData = {
-          shopifyOrderNumber: data.shopifyOrderNumber,
-          shopifyOrderId: data.shopifyOrderId,
+          shopifyOrderNumber: orderResult.orderNumber || orderResult.shopifyOrderNumber || data.shopifyOrderNumber,
+          shopifyOrderId: orderResult.orderId || data.shopifyOrderId,
           email: data.customer?.email,
           subtotalCents: subtotal,
           shippingCents: shipping,
-          discountCents: discount > 0 ? discount : 0,
-          totalCents: total + shipping,
+          discountCents: discount,
+          totalCents: total,
           currency: data.currency || "EUR",
           shopDomain: data.shopDomain,
           rawCart: data.rawCart,
@@ -74,7 +102,7 @@ function ThankYouContent() {
 
         setOrderData(processedOrderData)
 
-        // ✅ TRACKING FACEBOOK PIXEL PURCHASE (CLIENT-SIDE)
+        // 4. TRACKING FACEBOOK PIXEL PURCHASE
         if (typeof window !== 'undefined' && (window as any).fbq) {
           console.log('[ThankYou] 📊 Invio Facebook Pixel Purchase...')
           
@@ -85,26 +113,24 @@ function ThankYouContent() {
           const eventId = data.paymentIntentId || sessionId
           
           ;(window as any).fbq('track', 'Purchase', {
-            value: (total + shipping) / 100,
+            value: total / 100,
             currency: data.currency || 'EUR',
             content_ids: contentIds,
             content_type: 'product',
             num_items: (data.items || []).length,
           }, { eventID: eventId })
 
-          console.log('[ThankYou] ✅ Facebook Pixel inviato')
-          console.log('[ThankYou] Event ID:', eventId)
+          console.log('[ThankYou] ✅ Facebook Pixel inviato - Value:', total / 100)
         }
 
-        // ✅ TRACKING GOOGLE ADS PURCHASE (CLIENT-SIDE)
+        // 5. TRACKING GOOGLE ADS PURCHASE
         const sendGoogleConversion = () => {
           if (typeof window !== 'undefined' && (window as any).gtag) {
             console.log('[ThankYou] 📊 Invio Google Ads Purchase...')
             
-            const orderTotal = (total + shipping) / 100
-            const orderId = data.shopifyOrderNumber || data.shopifyOrderId || sessionId
+            const orderTotal = total / 100
+            const orderId = processedOrderData.shopifyOrderNumber || sessionId
             
-            // ✅ Evento purchase standard - Google lo associa automaticamente
             ;(window as any).gtag('event', 'purchase', {
               'send_to': 'AW-17925038279',
               'value': orderTotal,
@@ -118,31 +144,26 @@ function ThankYouContent() {
               }))
             })
 
-            console.log('[ThankYou] ✅ Google Ads Purchase inviato')
-            console.log('[ThankYou] Order ID:', orderId)
-            console.log('[ThankYou] Value:', orderTotal, data.currency || 'EUR')
+            console.log('[ThankYou] ✅ Google Ads Purchase inviato - Value:', orderTotal)
           }
         }
 
-        // Prova subito se gtag è già disponibile, altrimenti aspetta
         if ((window as any).gtag) {
           sendGoogleConversion()
         } else {
-          // Aspetta che gtag sia pronto
           const checkGtag = setInterval(() => {
             if ((window as any).gtag) {
               clearInterval(checkGtag)
               sendGoogleConversion()
             }
           }, 100)
-
-          // Timeout dopo 5 secondi
           setTimeout(() => clearInterval(checkGtag), 5000)
         }
 
+        // 6. SVUOTA CARRELLO
         if (data.rawCart?.id || data.rawCart?.token) {
           const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
-          console.log('[ThankYou] 🧹 Avvio svuotamento carrello')
+          console.log('[ThankYou] 🧹 Svuotamento carrello')
           
           try {
             const clearRes = await fetch('/api/clear-cart', {
@@ -154,30 +175,24 @@ function ThankYouContent() {
               }),
             })
 
-            const clearData = await clearRes.json()
-
             if (clearRes.ok) {
-              console.log('[ThankYou] ✅ Carrello svuotato con successo')
+              console.log('[ThankYou] ✅ Carrello svuotato')
               setCartCleared(true)
-            } else {
-              console.error('[ThankYou] ⚠️ Errore svuotamento:', clearData.error)
             }
           } catch (clearErr) {
-            console.error('[ThankYou] ⚠️ Errore chiamata clear-cart:', clearErr)
+            console.error('[ThankYou] ⚠️ Errore clear-cart:', clearErr)
           }
-        } else {
-          console.log('[ThankYou] ℹ️ Nessun carrello da svuotare')
         }
 
         setLoading(false)
       } catch (err: any) {
-        console.error("[ThankYou] Errore caricamento ordine:", err)
+        console.error("[ThankYou] ❌ Errore:", err)
         setError(err.message)
         setLoading(false)
       }
     }
 
-    loadOrderDataAndClearCart()
+    loadOrderAndCreateShopifyOrder()
   }, [sessionId])
 
   const shopUrl = orderData?.shopDomain 
@@ -226,7 +241,6 @@ function ThankYouContent() {
 
   return (
     <>
-      {/* ✅ GOOGLE TAG (GTAG.JS) - AW-17925038279 */}
       <Script
         src="https://www.googletagmanager.com/gtag/js?id=AW-17925038279"
         strategy="afterInteractive"
@@ -240,7 +254,6 @@ function ThankYouContent() {
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
             gtag('config', 'AW-17925038279');
-            console.log('[ThankYou] ✅ Google Tag inizializzato - AW-17925038279');
           `,
         }}
       />
@@ -256,7 +269,6 @@ function ThankYouContent() {
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           background: #fafafa;
           color: #333333;
-          -webkit-font-smoothing: antialiased;
         }
       `}</style>
 
@@ -416,24 +428,6 @@ function ThankYouContent() {
             >
               Torna alla home
             </a>
-            <a
-              href={`${shopUrl}/collections/all`}
-              className="block w-full py-3 px-4 bg-white text-gray-900 text-center font-medium rounded-md border border-gray-300 hover:bg-gray-50 transition"
-            >
-              Continua lo shopping
-            </a>
-          </div>
-
-          <div className="text-center mt-8 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-600 mb-2">
-              Hai bisogno di aiuto?
-            </p>
-            <a
-              href={`${shopUrl}/pages/contatti`}
-              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-            >
-              Contatta il supporto →
-            </a>
           </div>
 
           {cartCleared && (
@@ -470,4 +464,3 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
-
