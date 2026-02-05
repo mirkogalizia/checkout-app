@@ -4,6 +4,7 @@
 import { useEffect, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import Script from "next/script"
+import { sendFacebookPurchaseEvent } from "@/lib/facebook-capi"
 
 type OrderData = {
   shopifyOrderNumber?: string
@@ -15,6 +16,7 @@ type OrderData = {
   totalCents?: number
   currency?: string
   shopDomain?: string
+  paymentIntentId?: string
   rawCart?: { 
     id?: string
     token?: string
@@ -87,56 +89,144 @@ function ThankYouContent() {
           totalCents: finalTotal,
           currency: data.currency || "EUR",
           shopDomain: data.shopDomain,
+          paymentIntentId: data.paymentIntentId,
           rawCart: data.rawCart,
           items: data.items || [],
         }
 
         setOrderData(processedOrderData)
 
-        // ✅ TRACKING FACEBOOK PIXEL PURCHASE CON UTM
-        if (typeof window !== 'undefined' && (window as any).fbq) {
-          console.log('[ThankYou] 📊 Invio Facebook Pixel Purchase...')
+        // ═══════════════════════════════════════════════════════════
+        // ✅ TRACKING FACEBOOK PIXEL + CAPI CON DEDUPLICA
+        // ═══════════════════════════════════════════════════════════
+        if (typeof window !== 'undefined') {
+          console.log('[ThankYou] 📊 Avvio tracking Facebook completo...')
           
           const contentIds = (data.items || [])
             .map((item: any) => String(item.id || item.variant_id))
             .filter(Boolean)
           
-          const eventId = data.paymentIntentId || sessionId
-          
-          // Recupera UTM
-          const cartAttrs = data.rawCart?.attributes || {}
-          const utmData: any = {}
-          
-          if (cartAttrs._wt_last_source) utmData.utm_source = cartAttrs._wt_last_source
-          if (cartAttrs._wt_last_medium) utmData.utm_medium = cartAttrs._wt_last_medium
-          if (cartAttrs._wt_last_campaign) utmData.utm_campaign = cartAttrs._wt_last_campaign
-          if (cartAttrs._wt_last_content) utmData.utm_content = cartAttrs._wt_last_content
-          if (cartAttrs._wt_last_term) utmData.utm_term = cartAttrs._wt_last_term
-          if (cartAttrs._wt_last_fbclid) utmData.fbclid = cartAttrs._wt_last_fbclid
-          
-          console.log('[ThankYou] 📍 UTM Last Click:', utmData)
-          
-          const firstClickUTM: any = {}
-          if (cartAttrs._wt_first_source) firstClickUTM.first_source = cartAttrs._wt_first_source
-          if (cartAttrs._wt_first_campaign) firstClickUTM.first_campaign = cartAttrs._wt_first_campaign
-          
-          console.log('[ThankYou] 📍 UTM First Click:', firstClickUTM)
-          
-          ;(window as any).fbq('track', 'Purchase', {
-            value: finalTotal / 100,
-            currency: data.currency || 'EUR',
-            content_ids: contentIds,
-            content_type: 'product',
-            num_items: (data.items || []).length,
-            ...utmData
-          }, { eventID: eventId })
+          // ✅ EVENT ID SINCRONIZZATO con webhook (CRITICO per deduplica!)
+          const eventId = data.shopifyOrderId 
+            ? `order_${data.shopifyOrderId}` 
+            : data.paymentIntentId || sessionId
 
-          console.log('[ThankYou] ✅ Facebook Pixel Purchase inviato con UTM')
-          console.log('[ThankYou] Event ID:', eventId)
-          console.log('[ThankYou] Value:', finalTotal / 100, data.currency || 'EUR')
+          console.log('[ThankYou] 🎯 Event ID per deduplica:', eventId)
+          
+          // ✅ RECUPERA COOKIE FACEBOOK
+          const fbp = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('_fbp='))
+            ?.split('=')[1]
+          
+          const cartAttrs = data.rawCart?.attributes || {}
+          
+          // Costruisci fbc da cookie o ricostruiscilo da fbclid
+          const fbc = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('_fbc='))
+            ?.split('=')[1] || 
+            (cartAttrs._wt_last_fbclid 
+              ? `fb.1.${Date.now()}.${cartAttrs._wt_last_fbclid}` 
+              : undefined)
+          
+          // ✅ RECUPERA UTM
+          const utmData = {
+            source: cartAttrs._wt_last_source || undefined,
+            medium: cartAttrs._wt_last_medium || undefined,
+            campaign: cartAttrs._wt_last_campaign || undefined,
+            content: cartAttrs._wt_last_content || undefined,
+            term: cartAttrs._wt_last_term || undefined,
+          }
+          
+          console.log('[ThankYou] 🍪 fbp:', fbp || 'N/A')
+          console.log('[ThankYou] 🍪 fbc:', fbc || 'N/A')
+          console.log('[ThankYou] 📍 UTM:', utmData)
+          
+          let pixelFired = false
+          let capiFired = false
+          
+          // ═══════════════════════════════════════════════════════════
+          // 1. FACEBOOK PIXEL (CLIENT-SIDE) - Può essere bloccato
+          // ═══════════════════════════════════════════════════════════
+          if ((window as any).fbq) {
+            try {
+              (window as any).fbq('track', 'Purchase', {
+                value: finalTotal / 100,
+                currency: data.currency || 'EUR',
+                content_ids: contentIds,
+                content_type: 'product',
+                num_items: (data.items || []).length,
+                ...utmData
+              }, { 
+                eventID: eventId // ← STESSO eventId per deduplica!
+              })
+              
+              pixelFired = true
+              console.log('[ThankYou] ✅ Facebook Pixel Purchase inviato')
+              console.log('[ThankYou]    - Event ID:', eventId)
+              console.log('[ThankYou]    - Value:', finalTotal / 100, data.currency || 'EUR')
+              console.log('[ThankYou]    - UTM Campaign:', utmData.campaign || 'direct')
+            } catch (err) {
+              console.error('[ThankYou] ⚠️ Facebook Pixel bloccato:', err)
+            }
+          } else {
+            console.log('[ThankYou] ⚠️ Facebook Pixel non disponibile (fbq non trovato)')
+          }
+          
+          // ═══════════════════════════════════════════════════════════
+          // 2. FACEBOOK CAPI (SERVER-SIDE) - Sempre funziona!
+          // ═══════════════════════════════════════════════════════════
+          console.log('[ThankYou] 📤 Invio Facebook CAPI...')
+          
+          sendFacebookPurchaseEvent({
+            email: processedOrderData.email || '',
+            phone: data.customer?.phone,
+            firstName: data.customer?.fullName?.split(' ')[0],
+            lastName: data.customer?.fullName?.split(' ').slice(1).join(' '),
+            city: data.customer?.city,
+            postalCode: data.customer?.postalCode,
+            country: data.customer?.countryCode,
+            orderValue: finalTotal,
+            currency: data.currency || 'EUR',
+            orderItems: (data.items || []).map((item: any) => ({
+              id: String(item.id || item.variant_id || ''),
+              quantity: item.quantity || 1
+            })),
+            eventSourceUrl: window.location.href,
+            userAgent: navigator.userAgent,
+            fbp: fbp,
+            fbc: fbc,
+            eventId: eventId, // ← STESSO eventId del Pixel!
+            utm: utmData,
+          }).then(result => {
+            capiFired = result.success
+            if (result.success) {
+              console.log('[ThankYou] ✅ Facebook CAPI Purchase inviato')
+              console.log('[ThankYou]    - Event ID:', eventId)
+              console.log('[ThankYou]    - Match quality: alta (client-side data)')
+            } else {
+              console.error('[ThankYou] ⚠️ Facebook CAPI fallita:', result.error)
+            }
+          }).catch(err => {
+            console.error('[ThankYou] ⚠️ Errore chiamata CAPI:', err)
+          })
+
+          // ═══════════════════════════════════════════════════════════
+          // RIEPILOGO TRACKING FACEBOOK
+          // ═══════════════════════════════════════════════════════════
+          setTimeout(() => {
+            console.log('[ThankYou] 📊 Riepilogo Facebook Tracking:')
+            console.log('[ThankYou]    - Pixel fired:', pixelFired ? '✅' : '❌')
+            console.log('[ThankYou]    - CAPI fired:', capiFired ? '✅' : '❌')
+            console.log('[ThankYou]    - Event ID:', eventId)
+            console.log('[ThankYou]    - Deduplica:', pixelFired && capiFired ? '✅ Attiva' : '⚠️ Non necessaria')
+          }, 2000)
         }
 
-        // ✅ TRACKING GOOGLE ADS PURCHASE CON UTM
+        // ═══════════════════════════════════════════════════════════
+        // ✅ TRACKING GOOGLE ADS PURCHASE CON UTM (invariato)
+        // ═══════════════════════════════════════════════════════════
         const sendGoogleConversion = () => {
           if (typeof window !== 'undefined' && (window as any).gtag) {
             console.log('[ThankYou] 📊 Invio Google Ads Purchase...')
@@ -177,7 +267,9 @@ function ThankYouContent() {
           setTimeout(() => clearInterval(checkGtag), 5000)
         }
 
-        // ✅ NUOVO: SALVA ANALYTICS SU FIREBASE
+        // ═══════════════════════════════════════════════════════════
+        // ✅ SALVA ANALYTICS SU FIREBASE (invariato)
+        // ═══════════════════════════════════════════════════════════
         const saveAnalytics = async () => {
           try {
             console.log('[ThankYou] 💾 Salvataggio analytics su Firebase...')
@@ -245,7 +337,9 @@ function ThankYouContent() {
         // Salva analytics (non blocca il resto)
         saveAnalytics()
 
-        // SVUOTA CARRELLO
+        // ═══════════════════════════════════════════════════════════
+        // SVUOTA CARRELLO (invariato)
+        // ═══════════════════════════════════════════════════════════
         if (data.rawCart?.id || data.rawCart?.token) {
           const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
           console.log('[ThankYou] 🧹 Avvio svuotamento carrello')
@@ -319,7 +413,7 @@ function ThankYouContent() {
           </svg>
           <h1 className="text-2xl font-bold text-gray-900">Ordine non trovato</h1>
           <p className="text-gray-600">{error}</p>
-          <a
+          
             href={shopUrl}
             className="inline-block mt-4 px-6 py-3 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition"
           >
@@ -515,13 +609,13 @@ function ThankYouContent() {
           </div>
 
           <div className="space-y-3">
-            <a
+            
               href={shopUrl}
               className="block w-full py-3 px-4 bg-gray-900 text-white text-center font-medium rounded-md hover:bg-gray-800 transition"
             >
               Torna alla home
             </a>
-            <a
+            
               href={`${shopUrl}/collections/all`}
               className="block w-full py-3 px-4 bg-white text-gray-900 text-center font-medium rounded-md border border-gray-300 hover:bg-gray-50 transition"
             >
@@ -533,7 +627,7 @@ function ThankYouContent() {
             <p className="text-sm text-gray-600 mb-2">
               Hai bisogno di aiuto?
             </p>
-            <a
+            
               href={`${shopUrl}/pages/contatti`}
               className="text-sm text-blue-600 hover:text-blue-700 font-medium"
             >

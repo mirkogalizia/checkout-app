@@ -155,11 +155,13 @@ export async function POST(req: NextRequest) {
 
         console.log("[stripe-webhook] 💾 Statistiche giornaliere aggiornate")
 
-        // ✅ INVIO META CONVERSIONS API (SERVER-SIDE TRACKING)
+        // ✅ INVIO META CONVERSIONS API (SERVER-SIDE TRACKING CON UTM)
         await sendMetaPurchaseEvent({
           paymentIntent,
           sessionData,
           sessionId,
+          orderId: result.orderId,
+          orderNumber: result.orderNumber,
           req,
         })
 
@@ -196,17 +198,21 @@ export async function POST(req: NextRequest) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// META CONVERSIONS API - SERVER-SIDE TRACKING
+// META CONVERSIONS API - SERVER-SIDE TRACKING CON UTM E DEDUPLICA
 // ═══════════════════════════════════════════════════════════════
 async function sendMetaPurchaseEvent({
   paymentIntent,
   sessionData,
   sessionId,
+  orderId,
+  orderNumber,
   req,
 }: {
   paymentIntent: any
   sessionData: any
   sessionId: string
+  orderId: string | number
+  orderNumber: string | number
   req: NextRequest
 }) {
   const pixelId = process.env.NEXT_PUBLIC_FB_PIXEL_ID
@@ -218,7 +224,7 @@ async function sendMetaPurchaseEvent({
   }
 
   try {
-    console.log('[stripe-webhook] 📊 Invio Meta Conversions API...')
+    console.log('[stripe-webhook] 📊 Invio Meta Conversions API con UTM...')
 
     const customer = sessionData.customer || {}
     
@@ -227,7 +233,29 @@ async function sendMetaPurchaseEvent({
       return data ? crypto.createHash('sha256').update(data.toLowerCase().trim()).digest('hex') : undefined
     }
 
-    const eventId = paymentIntent.id
+    // ✅ RECUPERA UTM DAL CARRELLO SHOPIFY
+    const cartAttrs = sessionData.rawCart?.attributes || {}
+    const utmData = {
+      source: cartAttrs._wt_last_source || null,
+      medium: cartAttrs._wt_last_medium || null,
+      campaign: cartAttrs._wt_last_campaign || null,
+      content: cartAttrs._wt_last_content || null,
+      term: cartAttrs._wt_last_term || null,
+      fbclid: cartAttrs._wt_last_fbclid || null,
+    }
+
+    console.log('[stripe-webhook] 📍 UTM recuperati dal carrello:', {
+      source: utmData.source || 'N/A',
+      campaign: utmData.campaign || 'N/A',
+      content: utmData.content || 'N/A',
+    })
+
+    // ✅ EVENT ID SINCRONIZZATO (uguale a quello che userà thank-you page)
+    // CRITICO: Deve essere identico per la deduplica!
+    const eventId = orderId ? `order_${orderId}` : paymentIntent.id
+
+    console.log('[stripe-webhook] 🎯 Event ID per deduplica:', eventId)
+
     const eventTime = Math.floor(Date.now() / 1000)
 
     const userData: any = {
@@ -262,19 +290,33 @@ async function sendMetaPurchaseEvent({
       userData.country = hashData(cleanCountry)
     }
 
-    // ✅ COOKIE Meta (se disponibili)
+    // ✅ COOKIE Meta (se disponibili dai metadata Stripe)
     if (paymentIntent.metadata?.fbp) {
       userData.fbp = paymentIntent.metadata.fbp
+      console.log('[stripe-webhook] 🍪 fbp trovato nei metadata')
     }
     if (paymentIntent.metadata?.fbc) {
       userData.fbc = paymentIntent.metadata.fbc
+      console.log('[stripe-webhook] 🍪 fbc trovato nei metadata')
+    }
+    
+    // ✅ RICOSTRUISCI fbc da fbclid se manca ma fbclid è presente
+    if (!userData.fbc && utmData.fbclid) {
+      userData.fbc = `fb.1.${eventTime}.${utmData.fbclid}`
+      console.log('[stripe-webhook] 🍪 fbc ricostruito da fbclid salvato nel carrello')
     }
 
-    // ✅ CUSTOM DATA (parametri acquisto)
+    // ✅ CUSTOM DATA (parametri acquisto + UTM)
     const customData: any = {
       value: paymentIntent.amount / 100,
       currency: (paymentIntent.currency || 'EUR').toUpperCase(),
       content_type: 'product',
+      // ✅ AGGIUNGI UTM PER TRACKING CAMPAGNE
+      utm_source: utmData.source || undefined,
+      utm_medium: utmData.medium || undefined,
+      utm_campaign: utmData.campaign || undefined,
+      utm_content: utmData.content || undefined,
+      utm_term: utmData.term || undefined,
     }
 
     if (sessionData.items && sessionData.items.length > 0) {
@@ -292,7 +334,7 @@ async function sendMetaPurchaseEvent({
       data: [{
         event_name: 'Purchase',
         event_time: eventTime,
-        event_id: eventId,
+        event_id: eventId, // ← Deduplica con thank-you page
         event_source_url: `https://nfrcheckout.com/thank-you?sessionId=${sessionId}`,
         action_source: 'website',
         user_data: userData,
@@ -301,7 +343,11 @@ async function sendMetaPurchaseEvent({
       access_token: accessToken,
     }
 
-    console.log('[stripe-webhook] 📤 Payload Meta CAPI:', JSON.stringify(payload, null, 2))
+    console.log('[stripe-webhook] 📤 Invio CAPI a Meta...')
+    console.log('[stripe-webhook]    - Event ID:', eventId)
+    console.log('[stripe-webhook]    - Value:', customData.value, customData.currency)
+    console.log('[stripe-webhook]    - UTM Campaign:', utmData.campaign || 'direct')
+    console.log('[stripe-webhook]    - UTM Source:', utmData.source || 'direct')
 
     // ✅ INVIO A META
     const response = await fetch(
@@ -320,12 +366,62 @@ async function sendMetaPurchaseEvent({
       console.log('[stripe-webhook] 📊 Event ID:', eventId)
       console.log('[stripe-webhook] 📊 Events received:', result.events_received)
       console.log('[stripe-webhook] 🎯 FBTRACE ID:', result.fbtrace_id)
+
+      // ✅ SALVA TRACKING INFO SU FIREBASE
+      try {
+        await db.collection(COLLECTION).doc(sessionId).update({
+          'tracking.webhook': {
+            metaCapi: {
+              sent: true,
+              sentAt: new Date().toISOString(),
+              eventId: eventId,
+              fbtraceId: result.fbtrace_id,
+              eventsReceived: result.events_received,
+            },
+            utm: utmData,
+            cookies: {
+              fbp: userData.fbp || null,
+              fbc: userData.fbc || null,
+            }
+          }
+        })
+        console.log('[stripe-webhook] 💾 Tracking info salvata su Firebase')
+      } catch (saveError) {
+        console.error('[stripe-webhook] ⚠️ Errore salvataggio tracking info:', saveError)
+      }
+
     } else {
       console.error('[stripe-webhook] ❌ Errore Meta CAPI:', result)
+      
+      // Salva anche gli errori
+      try {
+        await db.collection(COLLECTION).doc(sessionId).update({
+          'tracking.webhook.metaCapi': {
+            sent: false,
+            sentAt: new Date().toISOString(),
+            error: result.error || 'Unknown error',
+          }
+        })
+      } catch (e) {
+        // Silent fail
+      }
     }
 
   } catch (error: any) {
     console.error('[stripe-webhook] ⚠️ Errore invio Meta CAPI:', error.message)
+    
+    // Salva errore critico
+    try {
+      await db.collection(COLLECTION).doc(sessionId).update({
+        'tracking.webhook.metaCapi': {
+          sent: false,
+          sentAt: new Date().toISOString(),
+          criticalError: error.message,
+        }
+      })
+    } catch (e) {
+      // Silent fail
+    }
   }
 }
 
