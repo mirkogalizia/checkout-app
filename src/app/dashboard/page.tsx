@@ -1,4 +1,3 @@
-// src/app/dashboard/page.tsx
 "use client"
 
 import { useEffect, useState } from "react"
@@ -98,7 +97,6 @@ export default function DashboardPage() {
       const res = await fetch(url)
       const json = await res.json()
       
-      // Check for new orders
       if (data && json.totalPurchases > data.totalPurchases && showNotif) {
         const diff = json.totalPurchases - data.totalPurchases
         showNotification(`🎉 ${diff} ${diff === 1 ? 'nuovo ordine' : 'nuovi ordini'}!`)
@@ -116,7 +114,6 @@ export default function DashboardPage() {
     loadData()
   }, [])
 
-  // Auto-refresh ogni 30 secondi
   useEffect(() => {
     if (!autoRefresh) return
     
@@ -223,19 +220,15 @@ export default function DashboardPage() {
 
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
-      {/* Toast Notification */}
       {notification && (
         <div className="fixed top-4 right-4 z-50 animate-slide-in">
           <div className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
             <span>{notification}</span>
-            <button onClick={() => setNotification(null)} className="text-white hover:text-gray-200">
-              ✕
-            </button>
+            <button onClick={() => setNotification(null)} className="text-white hover:text-gray-200">✕</button>
           </div>
         </div>
       )}
 
-      {/* Header */}
       <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -246,50 +239,42 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-  <button
-    onClick={() => setAutoRefresh(!autoRefresh)}
-    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-      autoRefresh
-        ? 'bg-green-600 text-white'
-        : darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
-    }`}
-  >
-    {autoRefresh ? '⚡ Auto-refresh: ON' : '⏸️ Auto-refresh: OFF'}
-  </button>
-  <button
-    onClick={exportCSV}
-    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-      darkMode 
-        ? 'bg-gray-700 text-white hover:bg-gray-600' 
-        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-    }`}
-  >
-    📥 Export CSV
-  </button>
-  <button
-    onClick={() => setDarkMode(!darkMode)}
-    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-      darkMode 
-        ? 'bg-gray-700 text-white hover:bg-gray-600' 
-        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-    }`}
-  >
-    {darkMode ? '☀️' : '🌙'}
-  </button>
-  
-    href="https://notforresale.it"
-    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
-  >
-    Vai al sito
-  </a>
-</div>
+              <button
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+                  autoRefresh ? 'bg-green-600 text-white' : darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+                }`}
+              >
+                {autoRefresh ? '⚡ Auto-refresh: ON' : '⏸️ Auto-refresh: OFF'}
+              </button>
+              <button
+                onClick={exportCSV}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+                  darkMode ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                📥 Export CSV
+              </button>
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+                  darkMode ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              
+                href="https://notforresale.it"
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
+              >
+                Vai al sito
+              </a>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Filtri */}
         <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-6 mb-6`}>
           <h2 className="text-lg font-semibold mb-4">Filtri e Confronto</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -301,9 +286,7 @@ export default function DashboardPage() {
                   value={dateRange.start}
                   onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
                   className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode 
-                      ? 'bg-gray-700 border-gray-600 text-white' 
-                      : 'bg-white border-gray-300 text-gray-900'
+                    darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
                   }`}
                 />
                 <input
@@ -311,9 +294,7 @@ export default function DashboardPage() {
                   value={dateRange.end}
                   onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
                   className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode 
-                      ? 'bg-gray-700 border-gray-600 text-white' 
-                      : 'bg-white border-gray-300 text-gray-900'
+                    darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
                   }`}
                 />
               </div>
@@ -339,9 +320,7 @@ export default function DashboardPage() {
                   onChange={(e) => setCompareRange({...compareRange, start: e.target.value})}
                   disabled={!showComparison}
                   className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode 
-                      ? 'bg-gray-700 border-gray-600 text-white disabled:opacity-50' 
-                      : 'bg-white border-gray-300 text-gray-900 disabled:opacity-50'
+                    darkMode ? 'bg-gray-700 border-gray-600 text-white disabled:opacity-50' : 'bg-white border-gray-300 text-gray-900 disabled:opacity-50'
                   }`}
                 />
                 <input
@@ -350,9 +329,7 @@ export default function DashboardPage() {
                   onChange={(e) => setCompareRange({...compareRange, end: e.target.value})}
                   disabled={!showComparison}
                   className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode 
-                      ? 'bg-gray-700 border-gray-600 text-white disabled:opacity-50' 
-                      : 'bg-white border-gray-300 text-gray-900 disabled:opacity-50'
+                    darkMode ? 'bg-gray-700 border-gray-600 text-white disabled:opacity-50' : 'bg-white border-gray-300 text-gray-900 disabled:opacity-50'
                   }`}
                 />
               </div>
@@ -374,9 +351,7 @@ export default function DashboardPage() {
                 setTimeout(() => loadData(), 100)
               }}
               className={`px-4 py-2 rounded-md transition text-sm font-medium ${
-                darkMode 
-                  ? 'bg-gray-700 text-white hover:bg-gray-600' 
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                darkMode ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
               }`}
             >
               Reset
@@ -384,14 +359,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Overview Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} p-6 rounded-lg shadow-sm border`}>
             <div className="flex items-center justify-between">
               <div>
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Totale Ordini
-                </p>
+                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Totale Ordini</p>
                 <p className="text-3xl font-bold mt-2">{data.totalPurchases}</p>
                 {data.comparison && renderTrend(data.totalPurchases, data.comparison.purchases)}
               </div>
@@ -406,12 +378,8 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} p-6 rounded-lg shadow-sm border`}>
             <div className="flex items-center justify-between">
               <div>
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Revenue Totale
-                </p>
-                <p className="text-3xl font-bold text-green-600 mt-2">
-                  {formatMoney(data.totalRevenue)}
-                </p>
+                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Revenue Totale</p>
+                <p className="text-3xl font-bold text-green-600 mt-2">{formatMoney(data.totalRevenue)}</p>
                 {data.comparison && renderTrend(data.totalRevenue, data.comparison.revenue)}
               </div>
               <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
@@ -425,12 +393,8 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} p-6 rounded-lg shadow-sm border`}>
             <div className="flex items-center justify-between">
               <div>
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Valore Medio Ordine
-                </p>
-                <p className="text-3xl font-bold mt-2">
-                  {formatMoney(data.avgOrderValue)}
-                </p>
+                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Valore Medio Ordine</p>
+                <p className="text-3xl font-bold mt-2">{formatMoney(data.avgOrderValue)}</p>
                 {data.comparison && renderTrend(data.avgOrderValue, data.comparison.avgOrderValue)}
               </div>
               <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
@@ -444,9 +408,7 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} p-6 rounded-lg shadow-sm border`}>
             <div className="flex items-center justify-between">
               <div>
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Clienti Unici
-                </p>
+                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Clienti Unici</p>
                 <p className="text-3xl font-bold mt-2">{data.uniqueCustomers}</p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
                   {data.totalPurchases > 0 ? ((data.uniqueCustomers / data.totalPurchases) * 100).toFixed(0) : 0}% repeat rate
@@ -461,43 +423,30 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Comparison Banner */}
         {data.comparison && (
           <div className={`${darkMode ? 'bg-blue-900 border-blue-800' : 'bg-blue-50 border-blue-200'} border rounded-lg p-6 mb-8`}>
             <h3 className="text-lg font-semibold mb-4">📊 Confronto Periodi</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
                 <p className={`text-sm ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>Ordini</p>
-                <p className="text-2xl font-bold mt-1">
-                  {data.totalPurchases} vs {data.comparison.purchases}
-                </p>
-                <p className={`text-sm mt-1 font-medium ${
-                  data.comparison.purchasesPercent >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <p className="text-2xl font-bold mt-1">{data.totalPurchases} vs {data.comparison.purchases}</p>
+                <p className={`text-sm mt-1 font-medium ${data.comparison.purchasesPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {data.comparison.purchasesPercent >= 0 ? '↑' : '↓'} {Math.abs(data.comparison.purchasesPercent)}%
                   ({data.comparison.purchasesDiff >= 0 ? '+' : ''}{data.comparison.purchasesDiff})
                 </p>
               </div>
               <div>
                 <p className={`text-sm ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>Revenue</p>
-                <p className="text-2xl font-bold mt-1">
-                  {formatMoney(data.totalRevenue)} vs {formatMoney(data.comparison.revenue)}
-                </p>
-                <p className={`text-sm mt-1 font-medium ${
-                  data.comparison.revenuePercent >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <p className="text-2xl font-bold mt-1">{formatMoney(data.totalRevenue)} vs {formatMoney(data.comparison.revenue)}</p>
+                <p className={`text-sm mt-1 font-medium ${data.comparison.revenuePercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {data.comparison.revenuePercent >= 0 ? '↑' : '↓'} {Math.abs(data.comparison.revenuePercent)}%
                   ({formatMoney(data.comparison.revenueDiff)})
                 </p>
               </div>
               <div>
                 <p className={`text-sm ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>AOV</p>
-                <p className="text-2xl font-bold mt-1">
-                  {formatMoney(data.avgOrderValue)} vs {formatMoney(data.comparison.avgOrderValue)}
-                </p>
-                <p className={`text-sm mt-1 font-medium ${
-                  data.comparison.avgOrderDiff >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <p className="text-2xl font-bold mt-1">{formatMoney(data.avgOrderValue)} vs {formatMoney(data.comparison.avgOrderValue)}</p>
+                <p className={`text-sm mt-1 font-medium ${data.comparison.avgOrderDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {data.comparison.avgOrderDiff >= 0 ? '↑' : '↓'} {formatMoney(Math.abs(data.comparison.avgOrderDiff))}
                 </p>
               </div>
@@ -505,27 +454,17 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {/* Daily Revenue Line Chart */}
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-6`}>
             <h2 className="text-xl font-semibold mb-4">📈 Revenue Giornaliera</h2>
             {data.dailyRevenue.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={data.dailyRevenue}>
                   <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#E5E7EB'} />
-                  <XAxis 
-                    dataKey="date" 
-                    tickFormatter={(value) => formatShortDate(String(value))}
-                    stroke={darkMode ? '#9CA3AF' : '#6B7280'}
-                  />
+                  <XAxis dataKey="date" tickFormatter={(value) => formatShortDate(String(value))} stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
                   <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
                   <Tooltip 
-                    contentStyle={{
-                      backgroundColor: darkMode ? '#1F2937' : '#FFFFFF',
-                      border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`,
-                      borderRadius: '8px'
-                    }}
+                    contentStyle={{backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: '8px'}}
                     formatter={(value: any) => [formatMoney(value), 'Revenue']}
                     labelFormatter={(label: any) => formatShortDate(String(label))}
                   />
@@ -537,7 +476,6 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Source Pie Chart */}
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-6`}>
             <h2 className="text-xl font-semibold mb-4">🥧 Revenue per Sorgente</h2>
             {data.bySource.length > 0 ? (
@@ -560,11 +498,7 @@ export default function DashboardPage() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    contentStyle={{
-                      backgroundColor: darkMode ? '#1F2937' : '#FFFFFF',
-                      border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`,
-                      borderRadius: '8px'
-                    }}
+                    contentStyle={{backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: '8px'}}
                     formatter={(value: any) => [formatMoney(value), 'Revenue']}
                   />
                 </PieChart>
@@ -575,27 +509,16 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Campaign Bar Chart */}
         <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-6 mb-8`}>
           <h2 className="text-xl font-semibold mb-4">📊 Performance per Campagna</h2>
           {data.byCampaign.length > 0 ? (
             <ResponsiveContainer width="100%" height={400}>
               <BarChart data={data.byCampaign.slice(0, 10)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#E5E7EB'} />
-                <XAxis 
-                  dataKey="campaign" 
-                  stroke={darkMode ? '#9CA3AF' : '#6B7280'}
-                  angle={-45}
-                  textAnchor="end"
-                  height={100}
-                />
+                <XAxis dataKey="campaign" stroke={darkMode ? '#9CA3AF' : '#6B7280'} angle={-45} textAnchor="end" height={100} />
                 <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
                 <Tooltip 
-                  contentStyle={{
-                    backgroundColor: darkMode ? '#1F2937' : '#FFFFFF',
-                    border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`,
-                    borderRadius: '8px'
-                  }}
+                  contentStyle={{backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: '8px'}}
                   formatter={(value: any, name: string) => {
                     if (name === 'revenue') return [formatMoney(value), 'Revenue']
                     return [value, 'Ordini']
@@ -611,25 +534,16 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Hourly Revenue */}
         <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-6 mb-8`}>
           <h2 className="text-xl font-semibold mb-4">🕐 Revenue per Ora del Giorno</h2>
           {data.hourlyRevenue.some(h => h.revenue > 0) ? (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={data.hourlyRevenue}>
                 <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#E5E7EB'} />
-                <XAxis 
-                  dataKey="hour" 
-                  stroke={darkMode ? '#9CA3AF' : '#6B7280'}
-                  tickFormatter={(hour) => `${hour}:00`}
-                />
+                <XAxis dataKey="hour" stroke={darkMode ? '#9CA3AF' : '#6B7280'} tickFormatter={(hour) => `${hour}:00`} />
                 <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
                 <Tooltip 
-                  contentStyle={{
-                    backgroundColor: darkMode ? '#1F2937' : '#FFFFFF',
-                    border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`,
-                    borderRadius: '8px'
-                  }}
+                  contentStyle={{backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: '8px'}}
                   formatter={(value: any) => [formatMoney(value), 'Revenue']}
                   labelFormatter={(hour: any) => `Ore ${hour}:00`}
                 />
@@ -641,7 +555,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Top Products */}
         {data.byProduct.length > 0 && (
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-8`}>
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -651,18 +564,10 @@ export default function DashboardPage() {
               <table className="w-full">
                 <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Prodotto
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Quantità
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Ordini
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Revenue
-                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prodotto</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Quantità</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
@@ -674,16 +579,10 @@ export default function DashboardPage() {
                           <span className="text-sm font-medium">{product.title}</span>
                         </div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right"><span className="text-sm">{product.quantity}</span></td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right"><span className="text-sm">{product.orders}</span></td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <span className="text-sm">{product.quantity}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <span className="text-sm">{product.orders}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <span className="text-sm font-semibold text-green-600">
-                          {formatMoney(product.revenue)}
-                        </span>
+                        <span className="text-sm font-semibold text-green-600">{formatMoney(product.revenue)}</span>
                       </td>
                     </tr>
                   ))}
@@ -693,7 +592,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Performance per Campagna Table */}
         <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-8`}>
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <h2 className="text-xl font-semibold">🎯 Performance Dettagliate per Campagna</h2>
@@ -702,64 +600,38 @@ export default function DashboardPage() {
             <table className="w-full">
               <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Campagna
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sorgente
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Ordini
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Revenue
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    AOV
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    % Revenue
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagna</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sorgente</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">AOV</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">% Revenue</th>
                 </tr>
               </thead>
               <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
                 {data.byCampaign.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
-                      Nessun dato disponibile
-                    </td>
+                    <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">Nessun dato disponibile</td>
                   </tr>
                 ) : (
                   data.byCampaign.map((campaign, idx) => (
                     <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                      <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm font-medium">{campaign.campaign}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium">{campaign.campaign}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span 
-                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white"
-                          style={{ backgroundColor: getSourceBadgeColor(campaign.source) }}
-                        >
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white"
+                          style={{ backgroundColor: getSourceBadgeColor(campaign.source) }}>
                           {campaign.source} / {campaign.medium}
                         </span>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right"><div className="text-sm">{campaign.purchases}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm">{campaign.purchases}</div>
+                        <div className="text-sm font-semibold text-green-600">{formatMoney(campaign.revenue)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-semibold text-green-600">
-                          {formatMoney(campaign.revenue)}
-                        </div>
+                        <div className="text-sm">{formatMoney(campaign.revenue / campaign.purchases)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm">
-                          {formatMoney(campaign.revenue / campaign.purchases)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm">
-                          {((campaign.revenue / data.totalRevenue) * 100).toFixed(1)}%
-                        </div>
+                        <div className="text-sm">{((campaign.revenue / data.totalRevenue) * 100).toFixed(1)}%</div>
                       </td>
                     </tr>
                   ))
@@ -769,57 +641,36 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Performance per Ad */}
         {data.byAd.length > 0 && (
           <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-8`}>
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-xl font-semibold">🎨 Performance per Ad</h2>
-              <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                Basato su utm_content (ad.id)
-              </p>
+              <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Basato su utm_content (ad.id)</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Ad ID
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Campagna
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Ordini
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Revenue
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      AOV
-                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagna</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">AOV</th>
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
                   {data.byAd.map((ad, idx) => (
                     <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-mono font-medium">{ad.adId}</div>
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm font-mono font-medium">{ad.adId}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-600 dark:text-gray-400">{ad.campaign}</div>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right"><div className="text-sm">{ad.purchases}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm">{ad.purchases}</div>
+                        <div className="text-sm font-semibold text-green-600">{formatMoney(ad.revenue)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-semibold text-green-600">
-                          {formatMoney(ad.revenue)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm">
-                          {formatMoney(ad.revenue / ad.purchases)}
-                        </div>
+                        <div className="text-sm">{formatMoney(ad.revenue / ad.purchases)}</div>
                       </td>
                     </tr>
                   ))}
@@ -829,33 +680,24 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Ultimi Acquisti */}
         <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border`}>
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <h2 className="text-xl font-semibold">🛒 Ultimi Acquisti</h2>
           </div>
           <div className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
             {data.recentPurchases.length === 0 ? (
-              <div className="px-6 py-8 text-center text-sm text-gray-500">
-                Nessun acquisto disponibile
-              </div>
+              <div className="px-6 py-8 text-center text-sm text-gray-500">Nessun acquisto disponibile</div>
             ) : (
               data.recentPurchases.map((purchase, idx) => (
                 <div key={idx} className={`px-6 py-4 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}`}>
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 flex-wrap">
-                        <div className="font-semibold">
-                          #{purchase.orderNumber || 'N/A'}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
-                          {purchase.utm?.campaign || 'direct'}
-                        </div>
+                        <div className="font-semibold">#{purchase.orderNumber || 'N/A'}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">{purchase.utm?.campaign || 'direct'}</div>
                         {purchase.utm?.source && (
-                          <span 
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
-                            style={{ backgroundColor: getSourceBadgeColor(purchase.utm.source) }}
-                          >
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
+                            style={{ backgroundColor: getSourceBadgeColor(purchase.utm.source) }}>
                             {purchase.utm.source}
                           </span>
                         )}
@@ -880,9 +722,7 @@ export default function DashboardPage() {
                       )}
                     </div>
                     <div className="text-right ml-4">
-                      <div className="text-lg font-semibold text-green-600">
-                        {formatMoney(purchase.value)}
-                      </div>
+                      <div className="text-lg font-semibold text-green-600">{formatMoney(purchase.value)}</div>
                     </div>
                   </div>
                 </div>
@@ -903,7 +743,6 @@ export default function DashboardPage() {
             opacity: 1;
           }
         }
-        
         .animate-slide-in {
           animation: slide-in 0.3s ease-out;
         }
