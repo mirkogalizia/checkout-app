@@ -22,6 +22,14 @@ export async function sendFacebookPurchaseEvent(params: {
   userAgent?: string
   fbp?: string
   fbc?: string
+  eventId?: string // ← AGGIUNTO
+  utm?: {         // ← AGGIUNTO
+    source?: string
+    medium?: string
+    campaign?: string
+    content?: string
+    term?: string
+  }
 }) {
   try {
     const pixelId = process.env.NEXT_PUBLIC_FB_PIXEL_ID
@@ -35,6 +43,7 @@ export async function sendFacebookPurchaseEvent(params: {
     const eventData = {
       event_name: 'Purchase',
       event_time: Math.floor(Date.now() / 1000),
+      event_id: params.eventId, // ← AGGIUNTO per deduplica
       action_source: 'website',
       event_source_url: params.eventSourceUrl,
       
@@ -58,10 +67,17 @@ export async function sendFacebookPurchaseEvent(params: {
         content_ids: params.orderItems.map(item => item.id.toString()),
         content_type: 'product',
         num_items: params.orderItems.reduce((sum, item) => sum + item.quantity, 0),
+        // ← AGGIUNTO UTM tracking (opzionale ma utile per Facebook)
+        ...(params.utm?.source && { utm_source: params.utm.source }),
+        ...(params.utm?.medium && { utm_medium: params.utm.medium }),
+        ...(params.utm?.campaign && { utm_campaign: params.utm.campaign }),
+        ...(params.utm?.content && { utm_content: params.utm.content }),
+        ...(params.utm?.term && { utm_term: params.utm.term }),
       },
     }
 
     console.log('[FB CAPI] 📤 Invio evento Purchase...')
+    console.log('[FB CAPI] 🎯 Event ID:', params.eventId || 'N/A')
 
     const response = await fetch(
       `https://graph.facebook.com/v18.0/${pixelId}/events`,
@@ -81,6 +97,7 @@ export async function sendFacebookPurchaseEvent(params: {
 
     if (response.ok) {
       console.log('[FB CAPI] ✅ Evento inviato con successo')
+      console.log('[FB CAPI] 📊 Events received:', result.events_received || 0)
       return { success: true, response: result }
     } else {
       console.error('[FB CAPI] ❌ Errore:', result)
