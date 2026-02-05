@@ -32,6 +32,14 @@ type OrderData = {
     priceCents?: number
     linePriceCents?: number
   }>
+  customer?: {
+    email?: string
+    phone?: string
+    fullName?: string
+    city?: string
+    postalCode?: string
+    countryCode?: string
+  }
 }
 
 function ThankYouContent() {
@@ -92,6 +100,7 @@ function ThankYouContent() {
           paymentIntentId: data.paymentIntentId,
           rawCart: data.rawCart,
           items: data.items || [],
+          customer: data.customer,
         }
 
         setOrderData(processedOrderData)
@@ -334,7 +343,6 @@ function ThankYouContent() {
           }
         }
 
-        // Salva analytics (non blocca il resto)
         saveAnalytics()
 
         // ═══════════════════════════════════════════════════════════
