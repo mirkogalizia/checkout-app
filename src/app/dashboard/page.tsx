@@ -246,43 +246,43 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                  autoRefresh
-                    ? 'bg-green-600 text-white'
-                    : darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {autoRefresh ? '⚡ Auto-refresh: ON' : '⏸️ Auto-refresh: OFF'}
-              </button>
-              <button
-                onClick={exportCSV}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                  darkMode 
-                    ? 'bg-gray-700 text-white hover:bg-gray-600' 
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                📥 Export CSV
-              </button>
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                  darkMode 
-                    ? 'bg-gray-700 text-white hover:bg-gray-600' 
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                {darkMode ? '☀️' : '🌙'}
-              </button>
-              
-                href="https://notforresale.it"
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
-              >
-                Vai al sito
-              </a>
-            </div>
+  <button
+    onClick={() => setAutoRefresh(!autoRefresh)}
+    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+      autoRefresh
+        ? 'bg-green-600 text-white'
+        : darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700'
+    }`}
+  >
+    {autoRefresh ? '⚡ Auto-refresh: ON' : '⏸️ Auto-refresh: OFF'}
+  </button>
+  <button
+    onClick={exportCSV}
+    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+      darkMode 
+        ? 'bg-gray-700 text-white hover:bg-gray-600' 
+        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+    }`}
+  >
+    📥 Export CSV
+  </button>
+  <button
+    onClick={() => setDarkMode(!darkMode)}
+    className={`px-4 py-2 rounded-md text-sm font-medium transition ${
+      darkMode 
+        ? 'bg-gray-700 text-white hover:bg-gray-600' 
+        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+    }`}
+  >
+    {darkMode ? '☀️' : '🌙'}
+  </button>
+  
+    href="https://notforresale.it"
+    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
+  >
+    Vai al sito
+  </a>
+</div>
           </div>
         </div>
       </div>
