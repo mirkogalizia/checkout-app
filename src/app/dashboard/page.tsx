@@ -488,10 +488,7 @@ export default function DashboardPage() {
                     cx="50%"
                     cy="50%"
                     outerRadius={100}
-                    label={(props: any) => {
-                      const { source, revenue } = props.payload;
-                      return `${source}: ${formatMoney(revenue)}`;
-                    }}
+                    label={(entry: any) => `${entry.source}: ${formatMoney(entry.revenue)}`}
                   >
                     {data.bySource.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -519,7 +516,7 @@ export default function DashboardPage() {
                 <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
                 <Tooltip 
                   contentStyle={{backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: '8px'}}
-                  formatter={(value: any, name: string) => {
+                  formatter={(value: any, name?: string) => {
                     if (name === 'revenue') return [formatMoney(value), 'Revenue']
                     return [value, 'Ordini']
                   }}
