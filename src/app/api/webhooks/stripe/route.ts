@@ -393,7 +393,6 @@ async function sendMetaPurchaseEvent({
     } else {
       console.error('[stripe-webhook] ❌ Errore Meta CAPI:', result)
       
-      // Salva anche gli errori
       try {
         await db.collection(COLLECTION).doc(sessionId).update({
           'tracking.webhook.metaCapi': {
@@ -402,15 +401,12 @@ async function sendMetaPurchaseEvent({
             error: result.error || 'Unknown error',
           }
         })
-      } catch (e) {
-        // Silent fail
-      }
+      } catch (e) {}
     }
 
   } catch (error: any) {
     console.error('[stripe-webhook] ⚠️ Errore invio Meta CAPI:', error.message)
     
-    // Salva errore critico
     try {
       await db.collection(COLLECTION).doc(sessionId).update({
         'tracking.webhook.metaCapi': {
@@ -419,14 +415,12 @@ async function sendMetaPurchaseEvent({
           criticalError: error.message,
         }
       })
-    } catch (e) {
-      // Silent fail
-    }
+    } catch (e) {}
   }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CREA ORDINE SHOPIFY
+// CREA ORDINE SHOPIFY CON GESTIONE CLIENTI ESISTENTI
 // ═══════════════════════════════════════════════════════════════
 async function createShopifyOrder({
   sessionId,
@@ -458,6 +452,41 @@ async function createShopifyOrder({
 
     console.log(`[createShopifyOrder] 📦 Prodotti: ${items.length}`)
     console.log(`[createShopifyOrder] 👤 Cliente: ${customer.email || 'N/A'}`)
+
+    // ═══════════════════════════════════════════════════════════
+    // ✅ CERCA CLIENTE ESISTENTE SU SHOPIFY (FIX TELEFONO DUPLICATO)
+    // ═══════════════════════════════════════════════════════════
+    let existingCustomerId: number | null = null
+
+    if (customer.email) {
+      console.log('[createShopifyOrder] 🔍 Ricerca cliente esistente per email...')
+      
+      try {
+        const searchResponse = await fetch(
+          `https://${shopifyDomain}/admin/api/2024-10/customers/search.json?query=email:${encodeURIComponent(customer.email)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Shopify-Access-Token': adminToken,
+            },
+          }
+        )
+
+        if (searchResponse.ok) {
+          const searchData = await searchResponse.json()
+          
+          if (searchData.customers && searchData.customers.length > 0) {
+            existingCustomerId = searchData.customers[0].id
+            console.log(`[createShopifyOrder] ✅ Cliente esistente trovato: ID ${existingCustomerId}`)
+          } else {
+            console.log('[createShopifyOrder] ℹ️ Cliente non trovato, verrà creato con l\'ordine')
+          }
+        }
+      } catch (searchErr: any) {
+        console.log(`[createShopifyOrder] ⚠️ Errore ricerca cliente (proseguo): ${searchErr.message}`)
+      }
+    }
 
     let phoneNumber = (customer.phone || "").trim()
     if (!phoneNumber || phoneNumber.length < 5) {
@@ -507,7 +536,10 @@ async function createShopifyOrder({
     const firstName = nameParts[0] || "Cliente"
     const lastName = nameParts.slice(1).join(" ") || "Checkout"
 
-    const orderPayload = {
+    // ═══════════════════════════════════════════════════════════
+    // ✅ PAYLOAD ORDINE CON GESTIONE CLIENTE ESISTENTE
+    // ═══════════════════════════════════════════════════════════
+    const orderPayload: any = {
       order: {
         email: customer.email || "noreply@notforresale.it",
         fulfillment_status: "unfulfilled",
@@ -516,13 +548,6 @@ async function createShopifyOrder({
         send_fulfillment_receipt: false,
 
         line_items: lineItems,
-
-        customer: {
-          email: customer.email || "noreply@notforresale.it",
-          first_name: firstName,
-          last_name: lastName,
-          phone: phoneNumber,
-        },
 
         shipping_address: {
           first_name: firstName,
@@ -572,6 +597,21 @@ async function createShopifyOrder({
       },
     }
 
+    // ✅ SE CLIENTE ESISTE → USA IL SUO ID (evita duplicati telefono)
+    // ALTRIMENTI → CREA NUOVO CLIENTE
+    if (existingCustomerId) {
+      orderPayload.order.customer = { id: existingCustomerId }
+      console.log(`[createShopifyOrder] 🔗 Collego ordine al cliente esistente: ${existingCustomerId}`)
+    } else {
+      orderPayload.order.customer = {
+        email: customer.email || "noreply@notforresale.it",
+        first_name: firstName,
+        last_name: lastName,
+        phone: phoneNumber,
+      }
+      console.log(`[createShopifyOrder] 👤 Creazione nuovo cliente`)
+    }
+
     console.log("[createShopifyOrder] 📤 Invio a Shopify API...")
 
     const response = await fetch(
@@ -596,6 +636,45 @@ async function createShopifyOrder({
       try {
         const errorData = JSON.parse(responseText)
         console.error("[createShopifyOrder] Errori:", JSON.stringify(errorData, null, 2))
+        
+        // ✅ FALLBACK: Se ancora errore telefono duplicato, riprova SENZA customer
+        if (errorData.errors?.['customer.phone_number'] || 
+            errorData.errors?.phone || 
+            JSON.stringify(errorData).includes('phone')) {
+          
+          console.log('[createShopifyOrder] ⚠️ Errore telefono, riprovo senza campo customer...')
+          
+          // Rimuovi completamente il blocco customer
+          delete orderPayload.order.customer
+          
+          const retryResponse = await fetch(
+            `https://${shopifyDomain}/admin/api/2024-10/orders.json`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": adminToken,
+              },
+              body: JSON.stringify(orderPayload),
+            }
+          )
+          
+          const retryText = await retryResponse.text()
+          
+          if (retryResponse.ok) {
+            const retryResult = JSON.parse(retryText)
+            
+            if (retryResult.order?.id) {
+              console.log("[createShopifyOrder] ✅ ORDINE CREATO AL SECONDO TENTATIVO!")
+              console.log(`[createShopifyOrder]    #${retryResult.order.order_number} (ID: ${retryResult.order.id})`)
+              
+              return {
+                orderId: retryResult.order.id,
+                orderNumber: retryResult.order.order_number,
+              }
+            }
+          }
+        }
       } catch (e) {}
       
       return { orderId: null, orderNumber: null }
