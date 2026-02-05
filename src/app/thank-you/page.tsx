@@ -18,7 +18,7 @@ type OrderData = {
   rawCart?: { 
     id?: string
     token?: string
-    attributes?: Record<string, any>  // ✅ AGGIUNTO
+    attributes?: Record<string, any>
   }
   items?: Array<{
     id?: string
@@ -57,14 +57,25 @@ function ThankYouContent() {
           throw new Error(data.error || "Errore caricamento ordine")
         }
 
-        // ✅ LOG ATTRIBUTES UTM
         console.log('[ThankYou] 📦 Dati carrello ricevuti:', data)
         console.log('[ThankYou] 📦 RawCart attributes:', data.rawCart?.attributes)
 
+        // ✅ CALCOLO CORRETTO DEI TOTALI
         const subtotal = data.subtotalCents || 0
-        const total = data.totalCents || 0
-        const shipping = data.shippingCents || 590
-        const discount = subtotal > 0 && total > 0 ? subtotal - (total - shipping) : 0
+        const shipping = 590 // SEMPRE 5.90€
+        
+        let discount = 0
+        if (data.totalCents && data.totalCents < subtotal) {
+          discount = subtotal - data.totalCents
+        }
+        
+        const finalTotal = subtotal - discount + shipping
+
+        console.log('[ThankYou] 💰 Calcoli:')
+        console.log('  - Subtotal:', subtotal / 100, '€')
+        console.log('  - Discount:', discount / 100, '€')
+        console.log('  - Shipping:', shipping / 100, '€')
+        console.log('  - TOTAL:', finalTotal / 100, '€')
 
         const processedOrderData = {
           shopifyOrderNumber: data.shopifyOrderNumber,
@@ -72,8 +83,8 @@ function ThankYouContent() {
           email: data.customer?.email,
           subtotalCents: subtotal,
           shippingCents: shipping,
-          discountCents: discount > 0 ? discount : 0,
-          totalCents: total + shipping,
+          discountCents: discount,
+          totalCents: finalTotal,
           currency: data.currency || "EUR",
           shopDomain: data.shopDomain,
           rawCart: data.rawCart,
@@ -92,11 +103,10 @@ function ThankYouContent() {
           
           const eventId = data.paymentIntentId || sessionId
           
-          // ✅ RECUPERA UTM dagli attributes del carrello
+          // Recupera UTM
           const cartAttrs = data.rawCart?.attributes || {}
           const utmData: any = {}
           
-          // Last click UTM (quello più recente - priorità)
           if (cartAttrs._wt_last_source) utmData.utm_source = cartAttrs._wt_last_source
           if (cartAttrs._wt_last_medium) utmData.utm_medium = cartAttrs._wt_last_medium
           if (cartAttrs._wt_last_campaign) utmData.utm_campaign = cartAttrs._wt_last_campaign
@@ -106,7 +116,6 @@ function ThankYouContent() {
           
           console.log('[ThankYou] 📍 UTM Last Click:', utmData)
           
-          // First click UTM (per riferimento)
           const firstClickUTM: any = {}
           if (cartAttrs._wt_first_source) firstClickUTM.first_source = cartAttrs._wt_first_source
           if (cartAttrs._wt_first_campaign) firstClickUTM.first_campaign = cartAttrs._wt_first_campaign
@@ -114,17 +123,17 @@ function ThankYouContent() {
           console.log('[ThankYou] 📍 UTM First Click:', firstClickUTM)
           
           ;(window as any).fbq('track', 'Purchase', {
-            value: (total + shipping) / 100,
+            value: finalTotal / 100,
             currency: data.currency || 'EUR',
             content_ids: contentIds,
             content_type: 'product',
             num_items: (data.items || []).length,
-            ...utmData // ✅ Aggiungi UTM last click al pixel
+            ...utmData
           }, { eventID: eventId })
 
           console.log('[ThankYou] ✅ Facebook Pixel Purchase inviato con UTM')
           console.log('[ThankYou] Event ID:', eventId)
-          console.log('[ThankYou] Value:', (total + shipping) / 100, data.currency || 'EUR')
+          console.log('[ThankYou] Value:', finalTotal / 100, data.currency || 'EUR')
         }
 
         // ✅ TRACKING GOOGLE ADS PURCHASE CON UTM
@@ -132,10 +141,9 @@ function ThankYouContent() {
           if (typeof window !== 'undefined' && (window as any).gtag) {
             console.log('[ThankYou] 📊 Invio Google Ads Purchase...')
             
-            const orderTotal = (total + shipping) / 100
+            const orderTotal = finalTotal / 100
             const orderId = data.shopifyOrderNumber || data.shopifyOrderId || sessionId
             
-            // ✅ Recupera UTM
             const cartAttrs = data.rawCart?.attributes || {}
             
             ;(window as any).gtag('event', 'conversion', {
@@ -143,7 +151,6 @@ function ThankYouContent() {
               'value': orderTotal,
               'currency': data.currency || 'EUR',
               'transaction_id': orderId,
-              // ✅ Aggiungi UTM come parametri custom
               'utm_source': cartAttrs._wt_last_source || '',
               'utm_medium': cartAttrs._wt_last_medium || '',
               'utm_campaign': cartAttrs._wt_last_campaign || '',
@@ -158,21 +165,85 @@ function ThankYouContent() {
           }
         }
 
-        // Prova subito se gtag è già disponibile, altrimenti aspetta
         if ((window as any).gtag) {
           sendGoogleConversion()
         } else {
-          // Aspetta che gtag sia pronto
           const checkGtag = setInterval(() => {
             if ((window as any).gtag) {
               clearInterval(checkGtag)
               sendGoogleConversion()
             }
           }, 100)
-
-          // Timeout dopo 5 secondi
           setTimeout(() => clearInterval(checkGtag), 5000)
         }
+
+        // ✅ NUOVO: SALVA ANALYTICS SU FIREBASE
+        const saveAnalytics = async () => {
+          try {
+            console.log('[ThankYou] 💾 Salvataggio analytics su Firebase...')
+            
+            const cartAttrs = data.rawCart?.attributes || {}
+            
+            const analyticsData = {
+              orderId: processedOrderData.shopifyOrderId || sessionId,
+              orderNumber: processedOrderData.shopifyOrderNumber || null,
+              sessionId: sessionId,
+              timestamp: new Date().toISOString(),
+              value: finalTotal / 100,
+              valueCents: finalTotal,
+              subtotalCents: subtotal,
+              shippingCents: shipping,
+              discountCents: discount,
+              currency: data.currency || 'EUR',
+              itemCount: (data.items || []).length,
+              utm: {
+                source: cartAttrs._wt_last_source || null,
+                medium: cartAttrs._wt_last_medium || null,
+                campaign: cartAttrs._wt_last_campaign || null,
+                content: cartAttrs._wt_last_content || null,
+                term: cartAttrs._wt_last_term || null,
+                fbclid: cartAttrs._wt_last_fbclid || null,
+              },
+              utm_first: {
+                source: cartAttrs._wt_first_source || null,
+                campaign: cartAttrs._wt_first_campaign || null,
+                referrer: cartAttrs._wt_first_referrer || null,
+                landing: cartAttrs._wt_first_landing || null,
+              },
+              customer: {
+                email: processedOrderData.email || null,
+              },
+              items: (data.items || []).map((item: any) => ({
+                id: item.id || item.variant_id,
+                title: item.title,
+                quantity: item.quantity,
+                priceCents: item.priceCents || 0,
+                linePriceCents: item.linePriceCents || 0,
+                image: item.image || null,
+                variantTitle: item.variantTitle || null,
+              })),
+              shopDomain: data.shopDomain || 'notforresale.it',
+            }
+
+            const analyticsRes = await fetch('/api/analytics/purchase', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(analyticsData)
+            })
+
+            if (analyticsRes.ok) {
+              const result = await analyticsRes.json()
+              console.log('[ThankYou] ✅ Analytics salvate su Firebase - ID:', result.id)
+            } else {
+              console.error('[ThankYou] ⚠️ Errore salvataggio analytics')
+            }
+          } catch (err) {
+            console.error('[ThankYou] ⚠️ Errore chiamata analytics:', err)
+          }
+        }
+
+        // Salva analytics (non blocca il resto)
+        saveAnalytics()
 
         // SVUOTA CARRELLO
         if (data.rawCart?.id || data.rawCart?.token) {
@@ -261,7 +332,6 @@ function ThankYouContent() {
 
   return (
     <>
-      {/* ✅ GOOGLE TAG (GTAG.JS) */}
       <Script
         src="https://www.googletagmanager.com/gtag/js?id=AW-17391033186"
         strategy="afterInteractive"
