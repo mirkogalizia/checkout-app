@@ -276,7 +276,7 @@ export default function DashboardPage() {
               >
                 {darkMode ? '☀️' : '🌙'}
               </button>
-              <a
+              
                 href="https://notforresale.it"
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
               >
@@ -550,7 +550,10 @@ export default function DashboardPage() {
                     cx="50%"
                     cy="50%"
                     outerRadius={100}
-                    label={(entry) => `${entry.source}: ${formatMoney(entry.revenue)}`}
+                    label={(props: any) => {
+                      const { source, revenue } = props.payload;
+                      return `${source}: ${formatMoney(revenue)}`;
+                    }}
                   >
                     {data.bySource.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -908,4 +911,3 @@ export default function DashboardPage() {
     </div>
   )
 }
-
