@@ -24,6 +24,7 @@ type ShopifyCart = {
   total_price?: number
   currency?: string
   token?: string
+  attributes?: Record<string, any>
 }
 
 type CheckoutItem = {
@@ -151,6 +152,9 @@ export async function POST(req: NextRequest) {
     // ✅ Costruisci cartId da token
     const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
 
+    // ✅ ESTRAI GLI ATTRIBUTES (inclusi UTM)
+    const cartAttributes = cart.attributes || {}
+
     const docData = {
       sessionId,
       createdAt: new Date().toISOString(),
@@ -163,8 +167,12 @@ export async function POST(req: NextRequest) {
       paymentIntentClientSecret: paymentIntent.client_secret,
       rawCart: {
         ...cart,
-        id: cartId  // ✅ Aggiungi id costruito
+        id: cartId,
+        attributes: cartAttributes  // ✅ Salva attributes esplicitamente
       },
+      customer: body.customer || null,
+      shopDomain: body.shop_domain || null,
+      discountCode: body.discount_code || null,
     }
 
     await db.collection(COLLECTION).doc(sessionId).set(docData)
@@ -272,6 +280,7 @@ export async function GET(req: NextRequest) {
         shopifyOrderId: data.shopifyOrderId,
         customer: data.customer,
         shopDomain: data.shopDomain,
+        attributes: data.rawCart?.attributes || {}, // ✅ Aggiungi attributes
       }),
       {
         status: 200,
