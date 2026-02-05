@@ -449,7 +449,7 @@ export default function DashboardPage() {
                 </p>
                 <p className="text-3xl font-bold mt-2">{data.uniqueCustomers}</p>
                 <p className={`text-sm mt-1 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-                  {((data.uniqueCustomers / data.totalPurchases) * 100).toFixed(0)}% repeat rate
+                  {data.totalPurchases > 0 ? ((data.uniqueCustomers / data.totalPurchases) * 100).toFixed(0) : 0}% repeat rate
                 </p>
               </div>
               <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900 rounded-lg flex items-center justify-center">
@@ -516,7 +516,7 @@ export default function DashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#E5E7EB'} />
                   <XAxis 
                     dataKey="date" 
-                    tickFormatter={formatShortDate}
+                    tickFormatter={(value) => formatShortDate(String(value))}
                     stroke={darkMode ? '#9CA3AF' : '#6B7280'}
                   />
                   <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} />
@@ -527,7 +527,7 @@ export default function DashboardPage() {
                       borderRadius: '8px'
                     }}
                     formatter={(value: any) => [formatMoney(value), 'Revenue']}
-                    labelFormatter={formatShortDate}
+                    labelFormatter={(label: any) => formatShortDate(String(label))}
                   />
                   <Line type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={2} dot={{ fill: '#3B82F6' }} />
                 </LineChart>
@@ -628,7 +628,7 @@ export default function DashboardPage() {
                     borderRadius: '8px'
                   }}
                   formatter={(value: any) => [formatMoney(value), 'Revenue']}
-                  labelFormatter={(hour) => `Ore ${hour}:00`}
+                  labelFormatter={(hour: any) => `Ore ${hour}:00`}
                 />
                 <Bar dataKey="revenue" fill="#8B5CF6" />
               </BarChart>
