@@ -42,6 +42,31 @@ type OrderData = {
   }
 }
 
+// ===================================================================
+// UTILITY FUNCTIONS
+// ===================================================================
+
+function generateFBC(fbclid: string, timestamp?: number): string {
+  const ts = timestamp || Math.floor(Date.now() / 1000) * 1000
+  return `fb.1.${ts}.${fbclid}`
+}
+
+function extractTimestampFromFbclid(fbclid: string): number | null {
+  try {
+    const match = fbclid.match(/\d{10,13}/)
+    if (match) {
+      return parseInt(match[0])
+    }
+  } catch (e) {
+    return Math.floor(Date.now() / (1000 * 60 * 60)) * (1000 * 60 * 60)
+  }
+  return null
+}
+
+// ===================================================================
+// MAIN COMPONENT
+// ===================================================================
+
 function ThankYouContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId")
@@ -104,6 +129,10 @@ function ThankYouContent() {
 
         setOrderData(processedOrderData)
 
+        // ===================================================================
+        // FACEBOOK TRACKING (PIXEL + CAPI)
+        // ===================================================================
+        
         if (typeof window !== 'undefined') {
           console.log('[ThankYou] 📊 Avvio tracking Facebook completo...')
           
@@ -117,6 +146,7 @@ function ThankYouContent() {
 
           console.log('[ThankYou] 🎯 Event ID per deduplica:', eventId)
           
+          // FBP Cookie
           const fbp = document.cookie
             .split('; ')
             .find(row => row.startsWith('_fbp='))
@@ -124,15 +154,20 @@ function ThankYouContent() {
           
           const cartAttrs = data.rawCart?.attributes || {}
           
-          const fbc = document.cookie
+          // FBC Cookie (stabile)
+          let fbc = document.cookie
             .split('; ')
             .find(row => row.startsWith('_fbc='))
-            ?.split('=')[1] || 
-            (cartAttrs._wt_last_fbclid 
-              ? `fb.1.${Date.now()}.${cartAttrs._wt_last_fbclid}` 
-              : undefined)
+            ?.split('=')[1]
+
+          if (!fbc && cartAttrs._wt_last_fbclid) {
+            const timestamp = extractTimestampFromFbclid(cartAttrs._wt_last_fbclid) || Date.now()
+            fbc = generateFBC(cartAttrs._wt_last_fbclid, timestamp)
+            console.log('[ThankYou] 🔧 FBC generato da fbclid:', fbc)
+          }
           
-          const utmData = {
+          // UTM Last Click
+          const utmLast = {
             source: cartAttrs._wt_last_source || undefined,
             medium: cartAttrs._wt_last_medium || undefined,
             campaign: cartAttrs._wt_last_campaign || undefined,
@@ -140,13 +175,24 @@ function ThankYouContent() {
             term: cartAttrs._wt_last_term || undefined,
           }
           
+          // UTM First Click
+          const utmFirst = {
+            source: cartAttrs._wt_first_source || undefined,
+            medium: cartAttrs._wt_first_medium || undefined,
+            campaign: cartAttrs._wt_first_campaign || undefined,
+            content: cartAttrs._wt_first_content || undefined,
+            term: cartAttrs._wt_first_term || undefined,
+          }
+          
           console.log('[ThankYou] 🍪 fbp:', fbp || 'N/A')
           console.log('[ThankYou] 🍪 fbc:', fbc || 'N/A')
-          console.log('[ThankYou] 📍 UTM:', utmData)
+          console.log('[ThankYou] 📍 UTM Last:', utmLast)
+          console.log('[ThankYou] 📍 UTM First:', utmFirst)
           
           let pixelFired = false
           let capiFired = false
           
+          // Facebook Pixel (Browser-Side)
           if ((window as any).fbq) {
             try {
               (window as any).fbq('track', 'Purchase', {
@@ -155,7 +201,7 @@ function ThankYouContent() {
                 content_ids: contentIds,
                 content_type: 'product',
                 num_items: (data.items || []).length,
-                ...utmData
+                ...utmLast
               }, { 
                 eventID: eventId
               })
@@ -164,7 +210,7 @@ function ThankYouContent() {
               console.log('[ThankYou] ✅ Facebook Pixel Purchase inviato')
               console.log('[ThankYou]    - Event ID:', eventId)
               console.log('[ThankYou]    - Value:', finalTotal / 100, data.currency || 'EUR')
-              console.log('[ThankYou]    - UTM Campaign:', utmData.campaign || 'direct')
+              console.log('[ThankYou]    - UTM Campaign:', utmLast.campaign || 'direct')
             } catch (err) {
               console.error('[ThankYou] ⚠️ Facebook Pixel bloccato:', err)
             }
@@ -172,6 +218,7 @@ function ThankYouContent() {
             console.log('[ThankYou] ⚠️ Facebook Pixel non disponibile (fbq non trovato)')
           }
           
+          // Facebook CAPI (Server-Side via Client)
           console.log('[ThankYou] 📤 Invio Facebook CAPI...')
           
           sendFacebookPurchaseEvent({
@@ -193,12 +240,14 @@ function ThankYouContent() {
             fbp: fbp,
             fbc: fbc,
             eventId: eventId,
-            utm: utmData,
+            utm: utmLast,
+            utmFirst: utmFirst,
           }).then(result => {
             capiFired = result.success
             if (result.success) {
               console.log('[ThankYou] ✅ Facebook CAPI Purchase inviato')
               console.log('[ThankYou]    - Event ID:', eventId)
+              console.log('[ThankYou]    - FBC:', fbc ? '✅' : '⚠️')
               console.log('[ThankYou]    - Match quality: alta (client-side data)')
             } else {
               console.error('[ThankYou] ⚠️ Facebook CAPI fallita:', result.error)
@@ -215,6 +264,10 @@ function ThankYouContent() {
             console.log('[ThankYou]    - Deduplica:', pixelFired && capiFired ? '✅ Attiva' : '⚠️ Non necessaria')
           }, 2000)
         }
+
+        // ===================================================================
+        // GOOGLE ADS CONVERSION
+        // ===================================================================
 
         const sendGoogleConversion = () => {
           if (typeof window !== 'undefined' && (window as any).gtag) {
@@ -256,6 +309,10 @@ function ThankYouContent() {
           setTimeout(() => clearInterval(checkGtag), 5000)
         }
 
+        // ===================================================================
+        // FIREBASE ANALYTICS
+        // ===================================================================
+
         const saveAnalytics = async () => {
           try {
             console.log('[ThankYou] 💾 Salvataggio analytics su Firebase...')
@@ -274,6 +331,8 @@ function ThankYouContent() {
               discountCents: discount,
               currency: data.currency || 'EUR',
               itemCount: (data.items || []).length,
+              
+              // Last Click UTM
               utm: {
                 source: cartAttrs._wt_last_source || null,
                 medium: cartAttrs._wt_last_medium || null,
@@ -281,16 +340,30 @@ function ThankYouContent() {
                 content: cartAttrs._wt_last_content || null,
                 term: cartAttrs._wt_last_term || null,
                 fbclid: cartAttrs._wt_last_fbclid || null,
+                gclid: cartAttrs._wt_last_gclid || null,
               },
+              
+              // First Click UTM
               utm_first: {
                 source: cartAttrs._wt_first_source || null,
+                medium: cartAttrs._wt_first_medium || null,
                 campaign: cartAttrs._wt_first_campaign || null,
+                content: cartAttrs._wt_first_content || null,
+                term: cartAttrs._wt_first_term || null,
                 referrer: cartAttrs._wt_first_referrer || null,
                 landing: cartAttrs._wt_first_landing || null,
+                fbclid: cartAttrs._wt_first_fbclid || null,
+                gclid: cartAttrs._wt_first_gclid || null,
               },
+              
               customer: {
                 email: processedOrderData.email || null,
+                fullName: data.customer?.fullName || null,
+                city: data.customer?.city || null,
+                postalCode: data.customer?.postalCode || null,
+                countryCode: data.customer?.countryCode || null,
               },
+              
               items: (data.items || []).map((item: any) => ({
                 id: item.id || item.variant_id,
                 title: item.title,
@@ -300,6 +373,7 @@ function ThankYouContent() {
                 image: item.image || null,
                 variantTitle: item.variantTitle || null,
               })),
+              
               shopDomain: data.shopDomain || 'notforresale.it',
             }
 
@@ -321,6 +395,10 @@ function ThankYouContent() {
         }
 
         saveAnalytics()
+
+        // ===================================================================
+        // CLEAR CART
+        // ===================================================================
 
         if (data.rawCart?.id || data.rawCart?.token) {
           const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
@@ -362,6 +440,10 @@ function ThankYouContent() {
     loadOrderDataAndClearCart()
   }, [sessionId])
 
+  // ===================================================================
+  // UTILITY FUNCTIONS
+  // ===================================================================
+
   const shopUrl = orderData?.shopDomain 
     ? `https://${orderData.shopDomain}`
     : "https://notforresale.it"
@@ -375,6 +457,10 @@ function ThankYouContent() {
     }).format(value)
   }
 
+  // ===================================================================
+  // RENDER: LOADING
+  // ===================================================================
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
@@ -385,6 +471,10 @@ function ThankYouContent() {
       </div>
     )
   }
+
+  // ===================================================================
+  // RENDER: ERROR
+  // ===================================================================
 
   if (error || !orderData) {
     return (
@@ -405,6 +495,10 @@ function ThankYouContent() {
       </div>
     )
   }
+
+  // ===================================================================
+  // RENDER: SUCCESS
+  // ===================================================================
 
   return (
     <>
@@ -442,6 +536,7 @@ function ThankYouContent() {
       `}</style>
 
       <div className="min-h-screen bg-[#fafafa]">
+        {/* HEADER */}
         <header className="bg-white border-b border-gray-200">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-center">
@@ -457,16 +552,20 @@ function ThankYouContent() {
           </div>
         </header>
 
+        {/* MAIN CONTENT */}
         <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
           
+          {/* SUCCESS CARD */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 sm:p-8 mb-6">
             
+            {/* Success Icon */}
             <div className="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mx-auto mb-6">
               <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
 
+            {/* Title */}
             <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 text-center mb-2">
               Ordine confermato
             </h1>
@@ -474,6 +573,7 @@ function ThankYouContent() {
               Grazie per il tuo acquisto!
             </p>
 
+            {/* Order Number */}
             {orderData.shopifyOrderNumber && (
               <div className="bg-gray-50 rounded-lg p-4 mb-6 text-center">
                 <p className="text-sm text-gray-600 mb-1">Numero ordine</p>
@@ -483,6 +583,7 @@ function ThankYouContent() {
               </div>
             )}
 
+            {/* Email Confirmation */}
             {orderData.email && (
               <div className="border-t border-gray-200 pt-6 mb-6">
                 <div className="flex items-start gap-3">
@@ -499,6 +600,7 @@ function ThankYouContent() {
               </div>
             )}
 
+            {/* Items List */}
             {orderData.items && orderData.items.length > 0 && (
               <div className="border-t border-gray-200 pt-6 mb-6">
                 <h2 className="text-base font-semibold text-gray-900 mb-4">
@@ -540,6 +642,7 @@ function ThankYouContent() {
               </div>
             )}
 
+            {/* Order Totals */}
             <div className="border-t border-gray-200 pt-6">
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -567,6 +670,7 @@ function ThankYouContent() {
             </div>
           </div>
 
+          {/* What Happens Next */}
           <div className="bg-blue-50 rounded-lg border border-blue-200 p-6 mb-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -590,6 +694,7 @@ function ThankYouContent() {
             </ul>
           </div>
 
+          {/* Action Buttons */}
           <div className="space-y-3">
             <a
               href={shopUrl}
@@ -605,6 +710,7 @@ function ThankYouContent() {
             </a>
           </div>
 
+          {/* Support Link */}
           <div className="text-center mt-8 pt-6 border-t border-gray-200">
             <p className="text-sm text-gray-600 mb-2">
               Hai bisogno di aiuto?
@@ -617,6 +723,7 @@ function ThankYouContent() {
             </a>
           </div>
 
+          {/* Cart Cleared Indicator */}
           {cartCleared && (
             <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
               <p className="text-xs text-green-800 text-center">
@@ -626,6 +733,7 @@ function ThankYouContent() {
           )}
         </div>
 
+        {/* FOOTER */}
         <footer className="border-t border-gray-200 py-6 mt-12">
           <div className="max-w-6xl mx-auto px-4 text-center">
             <p className="text-xs text-gray-500">
@@ -637,6 +745,10 @@ function ThankYouContent() {
     </>
   )
 }
+
+// ===================================================================
+// MAIN EXPORT WITH SUSPENSE
+// ===================================================================
 
 export default function ThankYouPage() {
   return (

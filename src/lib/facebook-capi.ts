@@ -22,8 +22,15 @@ export async function sendFacebookPurchaseEvent(params: {
   userAgent?: string
   fbp?: string
   fbc?: string
-  eventId?: string // ← AGGIUNTO
-  utm?: {         // ← AGGIUNTO
+  eventId?: string
+  utm?: {
+    source?: string
+    medium?: string
+    campaign?: string
+    content?: string
+    term?: string
+  }
+  utmFirst?: {  // ✅ AGGIUNTO per first-click attribution
     source?: string
     medium?: string
     campaign?: string
@@ -43,18 +50,19 @@ export async function sendFacebookPurchaseEvent(params: {
     const eventData = {
       event_name: 'Purchase',
       event_time: Math.floor(Date.now() / 1000),
-      event_id: params.eventId, // ← AGGIUNTO per deduplica
+      event_id: params.eventId,
       action_source: 'website',
       event_source_url: params.eventSourceUrl,
       
       user_data: {
-        em: hashData(params.email),
-        ph: params.phone ? hashData(params.phone) : undefined,
-        fn: params.firstName ? hashData(params.firstName) : undefined,
-        ln: params.lastName ? hashData(params.lastName) : undefined,
-        ct: params.city ? hashData(params.city) : undefined,
-        zp: params.postalCode ? hashData(params.postalCode) : undefined,
-        country: params.country ? hashData(params.country) : undefined,
+        // ✅ CORREZIONE: Facebook API richiede array di hash
+        em: [hashData(params.email)],
+        ph: params.phone ? [hashData(params.phone)] : undefined,
+        fn: params.firstName ? [hashData(params.firstName)] : undefined,
+        ln: params.lastName ? [hashData(params.lastName)] : undefined,
+        ct: params.city ? [hashData(params.city)] : undefined,
+        zp: params.postalCode ? [hashData(params.postalCode)] : undefined,
+        country: params.country ? [hashData(params.country)] : undefined,
         client_ip_address: params.clientIp,
         client_user_agent: params.userAgent,
         fbp: params.fbp,
@@ -63,21 +71,30 @@ export async function sendFacebookPurchaseEvent(params: {
       
       custom_data: {
         currency: params.currency,
-        value: params.orderValue / 100, // Converti da cents a euro
+        value: params.orderValue / 100,
         content_ids: params.orderItems.map(item => item.id.toString()),
         content_type: 'product',
         num_items: params.orderItems.reduce((sum, item) => sum + item.quantity, 0),
-        // ← AGGIUNTO UTM tracking (opzionale ma utile per Facebook)
+        
+        // ✅ Last Click UTM (per Facebook attribution)
         ...(params.utm?.source && { utm_source: params.utm.source }),
         ...(params.utm?.medium && { utm_medium: params.utm.medium }),
         ...(params.utm?.campaign && { utm_campaign: params.utm.campaign }),
         ...(params.utm?.content && { utm_content: params.utm.content }),
         ...(params.utm?.term && { utm_term: params.utm.term }),
+        
+        // ✅ First Click UTM (custom parameters per multi-touch)
+        ...(params.utmFirst?.source && { utm_first_source: params.utmFirst.source }),
+        ...(params.utmFirst?.campaign && { utm_first_campaign: params.utmFirst.campaign }),
       },
     }
 
     console.log('[FB CAPI] 📤 Invio evento Purchase...')
     console.log('[FB CAPI] 🎯 Event ID:', params.eventId || 'N/A')
+    console.log('[FB CAPI] 💰 Value:', params.orderValue / 100, params.currency)
+    console.log('[FB CAPI] 📍 UTM Campaign:', params.utm?.campaign || 'direct')
+    console.log('[FB CAPI] 🍪 fbp:', params.fbp ? '✅' : '⚠️')
+    console.log('[FB CAPI] 🍪 fbc:', params.fbc ? '✅' : '⚠️')
 
     const response = await fetch(
       `https://graph.facebook.com/v18.0/${pixelId}/events`,
@@ -95,13 +112,24 @@ export async function sendFacebookPurchaseEvent(params: {
 
     const result = await response.json()
 
-    if (response.ok) {
+    if (response.ok && result.events_received) {
       console.log('[FB CAPI] ✅ Evento inviato con successo')
-      console.log('[FB CAPI] 📊 Events received:', result.events_received || 0)
-      return { success: true, response: result }
+      console.log('[FB CAPI] 📊 Events received:', result.events_received)
+      console.log('[FB CAPI] 🎯 FBTRACE ID:', result.fbtrace_id)
+      
+      return { 
+        success: true, 
+        eventsReceived: result.events_received,
+        fbtraceId: result.fbtrace_id,
+        response: result 
+      }
     } else {
       console.error('[FB CAPI] ❌ Errore:', result)
-      return { success: false, error: result }
+      return { 
+        success: false, 
+        error: result.error?.message || 'Unknown error',
+        details: result 
+      }
     }
   } catch (error: any) {
     console.error('[FB CAPI] ❌ Errore fatale:', error.message)
