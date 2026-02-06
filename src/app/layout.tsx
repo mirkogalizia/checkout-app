@@ -2,6 +2,7 @@
 import "./globals.css"
 import type { Metadata } from "next"
 import FacebookPixel from "@/components/FacebookPixel"
+import { SpeedInsights } from "@vercel/speed-insights/next" // 👈 aggiungi questo
 
 export const metadata: Metadata = {
   title: "Checkout App",
@@ -18,6 +19,7 @@ export default function RootLayout({
       <body>
         <FacebookPixel />
         {children}
+        <SpeedInsights /> {/* 👈 e questo, alla fine del body */}
       </body>
     </html>
   )
