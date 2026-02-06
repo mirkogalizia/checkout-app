@@ -158,47 +158,62 @@ function CheckoutInner({
 
   // ✅ FACEBOOK PIXEL - INITIATE CHECKOUT (TRACKING CHECKOUT ABBANDONATI)
   useEffect(() => {
-    if (fbPixelSent) return
+  if (fbPixelSent) return
 
-    const sendFBPixel = () => {
-      if (typeof window !== 'undefined' && (window as any).fbq && cart.items.length > 0) {
-        console.log('[Checkout] 📊 Invio Facebook Pixel InitiateCheckout...')
-        
-        const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
-        const eventId = cart.paymentIntentId || sessionId
-        
-        ;(window as any).fbq('track', 'InitiateCheckout', {
-          value: totalToPayCents / 100,
-          currency: currency,
-          content_ids: contentIds,
-          content_type: 'product',
-          num_items: cart.items.reduce((sum, item) => sum + item.quantity, 0),
-        }, { eventID: eventId })
-
-        console.log('[Checkout] ✅ Facebook Pixel InitiateCheckout inviato')
-        console.log('[Checkout] Event ID:', eventId)
-        console.log('[Checkout] Value:', totalToPayCents / 100, currency)
-        
-        setFbPixelSent(true)
+  const sendFBPixel = async () => {
+    if (typeof window !== 'undefined' && (window as any).fbq && cart.items.length > 0) {
+      console.log('[Checkout] 📊 Invio Facebook Pixel InitiateCheckout...')
+      
+      // ✅ ESTRAI UTM DA RAWCART
+      const attrs = cart.rawCart?.attributes || {}
+      const utm = {
+        source: attrs._wt_last_source,
+        medium: attrs._wt_last_medium,
+        campaign: attrs._wt_last_campaign,
+        content: attrs._wt_last_content,
+        term: attrs._wt_last_term,
       }
-    }
 
-    // Prova subito se fbq è già disponibile
-    if ((window as any).fbq) {
-      sendFBPixel()
-    } else {
-      // Aspetta che fbq sia pronto
-      const checkFbq = setInterval(() => {
-        if ((window as any).fbq) {
-          clearInterval(checkFbq)
-          sendFBPixel()
-        }
-      }, 100)
+      console.log('[Checkout] 📍 UTM estratti:', utm)
+      
+      const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
+      const eventId = cart.paymentIntentId || sessionId
+      
+      ;(window as any).fbq('track', 'InitiateCheckout', {
+        value: totalToPayCents / 100,
+        currency: currency,
+        content_ids: contentIds,
+        content_type: 'product',
+        num_items: cart.items.reduce((sum, item) => sum + item.quantity, 0),
+        ...utm  // ✅ AGGIUNGI UTM!
+      }, { eventID: eventId })
 
-      // Timeout dopo 5 secondi
-      setTimeout(() => clearInterval(checkFbq), 5000)
+      console.log('[Checkout] ✅ Facebook Pixel InitiateCheckout inviato')
+      console.log('[Checkout] Event ID:', eventId)
+      console.log('[Checkout] Value:', totalToPayCents / 100, currency)
+      console.log('[Checkout] 📍 UTM Campaign:', utm.campaign || 'N/A')  // ✅ NUOVO!
+      console.log('[Checkout] 📍 UTM Source:', utm.source || 'N/A')      // ✅ NUOVO!
+      
+      setFbPixelSent(true)
     }
-  }, [fbPixelSent, cart.items, totalToPayCents, currency, sessionId, cart.paymentIntentId])
+  }
+
+  // Prova subito se fbq è già disponibile
+  if ((window as any).fbq) {
+    sendFBPixel()
+  } else {
+    // Aspetta che fbq sia pronto
+    const checkFbq = setInterval(() => {
+      if ((window as any).fbq) {
+        clearInterval(checkFbq)
+        sendFBPixel()
+      }
+    }, 100)
+
+    // Timeout dopo 5 secondi
+    setTimeout(() => clearInterval(checkFbq), 5000)
+  }
+}, [fbPixelSent, cart, totalToPayCents, currency, sessionId])
 
   useEffect(() => {
     let mounted = true
