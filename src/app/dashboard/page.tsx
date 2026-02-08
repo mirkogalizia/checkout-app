@@ -469,7 +469,7 @@ export default function DashboardPage() {
 
       {/* Header */}
       <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b sticky top-0 z-40 backdrop-blur-sm bg-opacity-95 shadow-sm`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
@@ -591,7 +591,7 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}>
             <div className="flex items-center justify-between">
               <div className="flex-1">
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wide`}>Ordini Totali</p>
+                <p className={`text-xs font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Ordini Totali</p>
                 <p className="text-xl sm:text-2xl lg:text-3xl font-bold mt-2">{data.totalPurchases.toLocaleString('it-IT')}</p>
                 <div className="mt-2">
                   {data.comparison && renderTrend(data.totalPurchases, data.comparison.purchases)}
@@ -608,7 +608,7 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}>
             <div className="flex items-center justify-between">
               <div className="flex-1">
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wide`}>Revenue</p>
+                <p className={`text-xs font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Revenue</p>
                 <p className="text-xl sm:text-2xl font-bold text-green-600 mt-2">{formatMoney(data.totalRevenue)}</p>
                 <div className="mt-2">
                   {data.comparison && renderTrend(data.totalRevenue, data.comparison.revenue)}
@@ -625,7 +625,7 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}>
             <div className="flex items-center justify-between">
               <div className="flex-1">
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wide`}>AOV</p>
+                <p className={`text-xs font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>AOV</p>
                 <p className="text-2xl sm:text-3xl font-bold mt-2">{formatMoney(data.avgOrderValue)}</p>
                 <div className="mt-2 flex items-center gap-2">
                   {data.comparison && renderTrend(data.avgOrderValue, data.comparison.avgOrderValue)}
@@ -645,7 +645,7 @@ export default function DashboardPage() {
           <div className={`${darkMode ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}>
             <div className="flex items-center justify-between">
               <div className="flex-1">
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-600'} uppercase tracking-wide`}>Repeat Rate</p>
+                <p className={`text-xs font-medium uppercase tracking-wide ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Repeat Rate</p>
                 <p className="text-2xl sm:text-3xl font-bold mt-2">{kpis ? kpis.repeatRate.toFixed(0) : 0}%</p>
                 <p className={`text-xs mt-2 ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
                   {data.uniqueCustomers} clienti unici
@@ -814,13 +814,13 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* 🎯 DETTAGLIO CAMPAGNE - OTTIMIZZATO */}
-        <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-lg border mb-6 sm:mb-8 overflow-hidden`}>
+        {/* Campaign Details Table */}
+        <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-6 sm:mb-8 overflow-hidden`}>
           <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20">
             <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
               🎯 <span>Dettaglio Campagne</span>
             </h2>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Performance dettagliata per campagna, ad set e creatività</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Performance per campagna, ad set e creatività</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -866,14 +866,12 @@ export default function DashboardPage() {
                         <td className="px-4 py-4">
                           {firstOrder?.adSet ? (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                              <span className="text-blue-600 dark:text-blue-400 text-xl flex-shrink-0 mt-0.5">📊</span>
-                              <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-sm font-bold text-blue-700 dark:text-blue-300 break-words leading-tight">
+                              <span className="text-blue-600 dark:text-blue-400 text-lg">📊</span>
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-sm font-bold text-blue-700 dark:text-blue-300 break-words">
                                   {firstOrder.adSet}
                                 </span>
-                                <span className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">
-                                  Ad Set
-                                </span>
+                                <span className="text-xs text-blue-600/70 dark:text-blue-400/70">Ad Set</span>
                               </div>
                             </div>
                           ) : (
@@ -883,14 +881,12 @@ export default function DashboardPage() {
                         <td className="px-4 py-4">
                           {firstOrder?.adName ? (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
-                              <span className="text-purple-600 dark:text-purple-400 text-xl flex-shrink-0 mt-0.5">📢</span>
-                              <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-sm font-bold text-purple-700 dark:text-purple-300 break-words leading-tight">
+                              <span className="text-purple-600 dark:text-purple-400 text-lg">📢</span>
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-sm font-bold text-purple-700 dark:text-purple-300 break-words">
                                   {firstOrder.adName}
                                 </span>
-                                <span className="text-xs text-purple-600/70 dark:text-purple-400/70 font-medium">
-                                  Creatività
-                                </span>
+                                <span className="text-xs text-purple-600/70 dark:text-purple-400/70">Creatività</span>
                               </div>
                             </div>
                           ) : (
