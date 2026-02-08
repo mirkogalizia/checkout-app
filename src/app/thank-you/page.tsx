@@ -4,7 +4,6 @@
 import { useEffect, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import Script from "next/script"
-import { sendFacebookPurchaseEvent } from "@/lib/facebook-capi"
 
 type OrderData = {
   shopifyOrderNumber?: string
@@ -41,31 +40,6 @@ type OrderData = {
     countryCode?: string
   }
 }
-
-// ===================================================================
-// UTILITY FUNCTIONS
-// ===================================================================
-
-function generateFBC(fbclid: string, timestamp?: number): string {
-  const ts = timestamp || Math.floor(Date.now() / 1000) * 1000
-  return `fb.1.${ts}.${fbclid}`
-}
-
-function extractTimestampFromFbclid(fbclid: string): number | null {
-  try {
-    const match = fbclid.match(/\d{10,13}/)
-    if (match) {
-      return parseInt(match[0])
-    }
-  } catch (e) {
-    return Math.floor(Date.now() / (1000 * 60 * 60)) * (1000 * 60 * 60)
-  }
-  return null
-}
-
-// ===================================================================
-// MAIN COMPONENT
-// ===================================================================
 
 function ThankYouContent() {
   const searchParams = useSearchParams()
@@ -130,139 +104,24 @@ function ThankYouContent() {
         setOrderData(processedOrderData)
 
         // ===================================================================
-        // FACEBOOK TRACKING (PIXEL + CAPI)
+        // FACEBOOK TRACKING - SOLO PAGEVIEW (Purchase gestito da webhook)
         // ===================================================================
         
         if (typeof window !== 'undefined') {
-          console.log('[ThankYou] 📊 Avvio tracking Facebook completo...')
+          console.log('[ThankYou] 📊 Facebook Pixel PageView')
           
-          const contentIds = (data.items || [])
-            .map((item: any) => String(item.id || item.variant_id))
-            .filter(Boolean)
-          
-          const eventId = data.shopifyOrderId 
-            ? `order_${data.shopifyOrderId}` 
-            : data.paymentIntentId || sessionId
-
-          console.log('[ThankYou] 🎯 Event ID per deduplica:', eventId)
-          
-          // FBP Cookie
-          const fbp = document.cookie
-            .split('; ')
-            .find(row => row.startsWith('_fbp='))
-            ?.split('=')[1]
-          
-          const cartAttrs = data.rawCart?.attributes || {}
-          
-          // FBC Cookie (stabile)
-          let fbc = document.cookie
-            .split('; ')
-            .find(row => row.startsWith('_fbc='))
-            ?.split('=')[1]
-
-          if (!fbc && cartAttrs._wt_last_fbclid) {
-            const timestamp = extractTimestampFromFbclid(cartAttrs._wt_last_fbclid) || Date.now()
-            fbc = generateFBC(cartAttrs._wt_last_fbclid, timestamp)
-            console.log('[ThankYou] 🔧 FBC generato da fbclid:', fbc)
-          }
-          
-          // UTM Last Click
-          const utmLast = {
-            source: cartAttrs._wt_last_source || undefined,
-            medium: cartAttrs._wt_last_medium || undefined,
-            campaign: cartAttrs._wt_last_campaign || undefined,
-            content: cartAttrs._wt_last_content || undefined,
-            term: cartAttrs._wt_last_term || undefined,
-          }
-          
-          // UTM First Click
-          const utmFirst = {
-            source: cartAttrs._wt_first_source || undefined,
-            medium: cartAttrs._wt_first_medium || undefined,
-            campaign: cartAttrs._wt_first_campaign || undefined,
-            content: cartAttrs._wt_first_content || undefined,
-            term: cartAttrs._wt_first_term || undefined,
-          }
-          
-          console.log('[ThankYou] 🍪 fbp:', fbp || 'N/A')
-          console.log('[ThankYou] 🍪 fbc:', fbc || 'N/A')
-          console.log('[ThankYou] 📍 UTM Last:', utmLast)
-          console.log('[ThankYou] 📍 UTM First:', utmFirst)
-          
-          let pixelFired = false
-          let capiFired = false
-          
-          // Facebook Pixel (Browser-Side)
           if ((window as any).fbq) {
             try {
-              (window as any).fbq('track', 'Purchase', {
-                value: finalTotal / 100,
-                currency: data.currency || 'EUR',
-                content_ids: contentIds,
-                content_type: 'product',
-                num_items: (data.items || []).length,
-                ...utmLast
-              }, { 
-                eventID: eventId
-              })
-              
-              pixelFired = true
-              console.log('[ThankYou] ✅ Facebook Pixel Purchase inviato')
-              console.log('[ThankYou]    - Event ID:', eventId)
-              console.log('[ThankYou]    - Value:', finalTotal / 100, data.currency || 'EUR')
-              console.log('[ThankYou]    - UTM Campaign:', utmLast.campaign || 'direct')
+              // ✅ SOLO PAGEVIEW (Purchase già inviato dal webhook)
+              ;(window as any).fbq('track', 'PageView')
+              console.log('[ThankYou] ✅ Facebook Pixel PageView inviato')
+              console.log('[ThankYou] ℹ️ Purchase già tracciato dal webhook Stripe con UTM')
             } catch (err) {
               console.error('[ThankYou] ⚠️ Facebook Pixel bloccato:', err)
             }
           } else {
             console.log('[ThankYou] ⚠️ Facebook Pixel non disponibile (fbq non trovato)')
           }
-          
-          // Facebook CAPI (Server-Side via Client)
-          console.log('[ThankYou] 📤 Invio Facebook CAPI...')
-          
-          sendFacebookPurchaseEvent({
-            email: processedOrderData.email || '',
-            phone: data.customer?.phone,
-            firstName: data.customer?.fullName?.split(' ')[0],
-            lastName: data.customer?.fullName?.split(' ').slice(1).join(' '),
-            city: data.customer?.city,
-            postalCode: data.customer?.postalCode,
-            country: data.customer?.countryCode,
-            orderValue: finalTotal,
-            currency: data.currency || 'EUR',
-            orderItems: (data.items || []).map((item: any) => ({
-              id: String(item.id || item.variant_id || ''),
-              quantity: item.quantity || 1
-            })),
-            eventSourceUrl: window.location.href,
-            userAgent: navigator.userAgent,
-            fbp: fbp,
-            fbc: fbc,
-            eventId: eventId,
-            utm: utmLast,
-            utmFirst: utmFirst,
-          }).then(result => {
-            capiFired = result.success
-            if (result.success) {
-              console.log('[ThankYou] ✅ Facebook CAPI Purchase inviato')
-              console.log('[ThankYou]    - Event ID:', eventId)
-              console.log('[ThankYou]    - FBC:', fbc ? '✅' : '⚠️')
-              console.log('[ThankYou]    - Match quality: alta (client-side data)')
-            } else {
-              console.error('[ThankYou] ⚠️ Facebook CAPI fallita:', result.error)
-            }
-          }).catch(err => {
-            console.error('[ThankYou] ⚠️ Errore chiamata CAPI:', err)
-          })
-
-          setTimeout(() => {
-            console.log('[ThankYou] 📊 Riepilogo Facebook Tracking:')
-            console.log('[ThankYou]    - Pixel fired:', pixelFired ? '✅' : '❌')
-            console.log('[ThankYou]    - CAPI fired:', capiFired ? '✅' : '❌')
-            console.log('[ThankYou]    - Event ID:', eventId)
-            console.log('[ThankYou]    - Deduplica:', pixelFired && capiFired ? '✅ Attiva' : '⚠️ Non necessaria')
-          }, 2000)
         }
 
         // ===================================================================
@@ -325,72 +184,47 @@ function ThankYouContent() {
               sessionId: sessionId,
               timestamp: new Date().toISOString(),
               value: finalTotal / 100,
-              valueCents: finalTotal,
-              subtotalCents: subtotal,
-              shippingCents: shipping,
-              discountCents: discount,
               currency: data.currency || 'EUR',
-              itemCount: (data.items || []).length,
-              
-              // Last Click UTM
+              items: (data.items || []).map((item: any) => ({
+                id: String(item.id || item.variant_id),
+                title: item.title,
+                quantity: item.quantity,
+                price: (item.priceCents || 0) / 100,
+              })),
+              customer: {
+                email: data.customer?.email || null,
+                city: data.customer?.city || null,
+                country: data.customer?.countryCode || null,
+              },
               utm: {
                 source: cartAttrs._wt_last_source || null,
                 medium: cartAttrs._wt_last_medium || null,
                 campaign: cartAttrs._wt_last_campaign || null,
                 content: cartAttrs._wt_last_content || null,
                 term: cartAttrs._wt_last_term || null,
-                fbclid: cartAttrs._wt_last_fbclid || null,
-                gclid: cartAttrs._wt_last_gclid || null,
               },
-              
-              // First Click UTM
               utm_first: {
                 source: cartAttrs._wt_first_source || null,
                 medium: cartAttrs._wt_first_medium || null,
                 campaign: cartAttrs._wt_first_campaign || null,
                 content: cartAttrs._wt_first_content || null,
                 term: cartAttrs._wt_first_term || null,
-                referrer: cartAttrs._wt_first_referrer || null,
-                landing: cartAttrs._wt_first_landing || null,
-                fbclid: cartAttrs._wt_first_fbclid || null,
-                gclid: cartAttrs._wt_first_gclid || null,
               },
-              
-              customer: {
-                email: processedOrderData.email || null,
-                fullName: data.customer?.fullName || null,
-                city: data.customer?.city || null,
-                postalCode: data.customer?.postalCode || null,
-                countryCode: data.customer?.countryCode || null,
-              },
-              
-              items: (data.items || []).map((item: any) => ({
-                id: item.id || item.variant_id,
-                title: item.title,
-                quantity: item.quantity,
-                priceCents: item.priceCents || 0,
-                linePriceCents: item.linePriceCents || 0,
-                image: item.image || null,
-                variantTitle: item.variantTitle || null,
-              })),
-              
-              shopDomain: data.shopDomain || 'notforresale.it',
             }
 
-            const analyticsRes = await fetch('/api/analytics/purchase', {
+            const analyticsRes = await fetch('/api/save-analytics', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(analyticsData)
+              body: JSON.stringify(analyticsData),
             })
 
             if (analyticsRes.ok) {
-              const result = await analyticsRes.json()
-              console.log('[ThankYou] ✅ Analytics salvate su Firebase - ID:', result.id)
+              console.log('[ThankYou] ✅ Analytics salvate su Firebase')
             } else {
               console.error('[ThankYou] ⚠️ Errore salvataggio analytics')
             }
           } catch (err) {
-            console.error('[ThankYou] ⚠️ Errore chiamata analytics:', err)
+            console.error('[ThankYou] ⚠️ Errore salvataggio analytics:', err)
           }
         }
 
@@ -402,7 +236,7 @@ function ThankYouContent() {
 
         if (data.rawCart?.id || data.rawCart?.token) {
           const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
-          console.log('[ThankYou] 🧹 Avvio svuotamento carrello')
+          console.log('[ThankYou] 🧹 Vidage du panier')
           
           try {
             const clearRes = await fetch('/api/clear-cart', {
@@ -417,21 +251,19 @@ function ThankYouContent() {
             const clearData = await clearRes.json()
 
             if (clearRes.ok) {
-              console.log('[ThankYou] ✅ Carrello svuotato con successo')
+              console.log('[ThankYou] ✅ Panier vidé avec succès')
               setCartCleared(true)
             } else {
-              console.error('[ThankYou] ⚠️ Errore svuotamento:', clearData.error)
+              console.error('[ThankYou] ⚠️ Erreur vidage:', clearData.error)
             }
           } catch (clearErr) {
-            console.error('[ThankYou] ⚠️ Errore chiamata clear-cart:', clearErr)
+            console.error('[ThankYou] ⚠️ Erreur appel clear-cart:', clearErr)
           }
-        } else {
-          console.log('[ThankYou] ℹ️ Nessun carrello da svuotare')
         }
 
         setLoading(false)
       } catch (err: any) {
-        console.error("[ThankYou] Errore caricamento ordine:", err)
+        console.error("[ThankYou] Erreur chargement commande:", err)
         setError(err.message)
         setLoading(false)
       }
@@ -439,14 +271,6 @@ function ThankYouContent() {
 
     loadOrderDataAndClearCart()
   }, [sessionId])
-
-  // ===================================================================
-  // UTILITY FUNCTIONS
-  // ===================================================================
-
-  const shopUrl = orderData?.shopDomain 
-    ? `https://${orderData.shopDomain}`
-    : "https://notforresale.it"
 
   const formatMoney = (cents: number | undefined) => {
     const value = (cents ?? 0) / 100
@@ -456,10 +280,6 @@ function ThankYouContent() {
       minimumFractionDigits: 2,
     }).format(value)
   }
-
-  // ===================================================================
-  // RENDER: LOADING
-  // ===================================================================
 
   if (loading) {
     return (
@@ -472,10 +292,6 @@ function ThankYouContent() {
     )
   }
 
-  // ===================================================================
-  // RENDER: ERROR
-  // ===================================================================
-
   if (error || !orderData) {
     return (
       <div className="min-h-screen bg-[#fafafa] flex items-center justify-center px-4">
@@ -486,22 +302,36 @@ function ThankYouContent() {
           <h1 className="text-2xl font-bold text-gray-900">Ordine non trovato</h1>
           <p className="text-gray-600">{error}</p>
           <a
-            href={shopUrl}
+            href={`https://${orderData?.shopDomain || 'nfrcheckout.com'}`}
             className="inline-block mt-4 px-6 py-3 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition"
           >
-            Torna alla home
+            Torna al negozio
           </a>
         </div>
       </div>
     )
   }
 
-  // ===================================================================
-  // RENDER: SUCCESS
-  // ===================================================================
-
   return (
     <>
+      {/* ✅ FACEBOOK PIXEL INIT - Solo per PageView */}
+      <Script id="facebook-pixel" strategy="afterInteractive">
+        {`
+          !function(f,b,e,v,n,t,s)
+          {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+          n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+          if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+          n.queue=[];t=b.createElement(e);t.async=!0;
+          t.src=v;s=b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t,s)}(window, document,'script',
+          'https://connect.facebook.net/en_US/fbevents.js');
+          
+          fbq('init', '${process.env.NEXT_PUBLIC_FB_PIXEL_ID}');
+          console.log('[ThankYou] ✅ Facebook Pixel inizializzato (PageView only)');
+        `}
+      </Script>
+
+      {/* ✅ GOOGLE ADS */}
       <Script
         src="https://www.googletagmanager.com/gtag/js?id=AW-17391033186"
         strategy="afterInteractive"
@@ -520,43 +350,9 @@ function ThankYouContent() {
         }}
       />
 
-      <style jsx global>{`
-        * {
-          box-sizing: border-box;
-          margin: 0;
-          padding: 0;
-        }
-
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          background: #fafafa;
-          color: #333333;
-          -webkit-font-smoothing: antialiased;
-        }
-      `}</style>
-
-      <div className="min-h-screen bg-[#fafafa]">
-        {/* HEADER */}
-        <header className="bg-white border-b border-gray-200">
-          <div className="max-w-6xl mx-auto px-4 py-4">
-            <div className="flex justify-center">
-              <a href={shopUrl}>
-                <img
-                  src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
-                  alt="Logo"
-                  className="h-12"
-                  style={{ maxWidth: '180px' }}
-                />
-              </a>
-            </div>
-          </div>
-        </header>
-
-        {/* MAIN CONTENT */}
-        <div className="max-w-2xl mx-auto px-4 py-8 sm:py-12">
-          
-          {/* SUCCESS CARD */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 sm:p-8 mb-6">
+      <div className="min-h-screen bg-[#fafafa] py-12">
+        <div className="max-w-3xl mx-auto px-4">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
             
             {/* Success Icon */}
             <div className="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mx-auto mb-6">
@@ -565,12 +361,11 @@ function ThankYouContent() {
               </svg>
             </div>
 
-            {/* Title */}
-            <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 text-center mb-2">
-              Ordine confermato
+            <h1 className="text-3xl font-bold text-gray-900 text-center mb-2">
+              Ordine Confermato!
             </h1>
             <p className="text-center text-gray-600 mb-6">
-              Grazie per il tuo acquisto!
+              Grazie per il tuo acquisto
             </p>
 
             {/* Order Number */}
@@ -600,11 +395,11 @@ function ThankYouContent() {
               </div>
             )}
 
-            {/* Items List */}
+            {/* Order Items */}
             {orderData.items && orderData.items.length > 0 && (
               <div className="border-t border-gray-200 pt-6 mb-6">
                 <h2 className="text-base font-semibold text-gray-900 mb-4">
-                  Articoli acquistati
+                  Prodotti ordinati
                 </h2>
                 <div className="space-y-4">
                   {orderData.items.map((item, idx) => (
@@ -670,13 +465,13 @@ function ThankYouContent() {
             </div>
           </div>
 
-          {/* What Happens Next */}
-          <div className="bg-blue-50 rounded-lg border border-blue-200 p-6 mb-6">
+          {/* Info Box */}
+          <div className="bg-blue-50 rounded-lg border border-blue-200 p-6 mt-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Cosa succede ora?
+              Prossimi passi
             </h2>
             <ul className="space-y-3 text-sm text-gray-700">
               <li className="flex items-start gap-2">
@@ -685,7 +480,7 @@ function ThankYouContent() {
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-semibold">2.</span>
-                <span>Il tuo ordine verrà preparato entro 1-2 giorni lavorativi</span>
+                <span>Il tuo ordine verrà elaborato entro 1-2 giorni lavorativi</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-blue-600 font-semibold">3.</span>
@@ -695,35 +490,16 @@ function ThankYouContent() {
           </div>
 
           {/* Action Buttons */}
-          <div className="space-y-3">
+          <div className="space-y-3 mt-6">
             <a
-              href={shopUrl}
+              href={`https://${orderData.shopDomain || 'nfrcheckout.com'}`}
               className="block w-full py-3 px-4 bg-gray-900 text-white text-center font-medium rounded-md hover:bg-gray-800 transition"
             >
-              Torna alla home
-            </a>
-            <a
-              href={`${shopUrl}/collections/all`}
-              className="block w-full py-3 px-4 bg-white text-gray-900 text-center font-medium rounded-md border border-gray-300 hover:bg-gray-50 transition"
-            >
-              Continua lo shopping
+              Torna al negozio
             </a>
           </div>
 
-          {/* Support Link */}
-          <div className="text-center mt-8 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-600 mb-2">
-              Hai bisogno di aiuto?
-            </p>
-            <a
-              href={`${shopUrl}/pages/contatti`}
-              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-            >
-              Contatta il supporto →
-            </a>
-          </div>
-
-          {/* Cart Cleared Indicator */}
+          {/* Cart Cleared Confirmation */}
           {cartCleared && (
             <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
               <p className="text-xs text-green-800 text-center">
@@ -732,23 +508,10 @@ function ThankYouContent() {
             </div>
           )}
         </div>
-
-        {/* FOOTER */}
-        <footer className="border-t border-gray-200 py-6 mt-12">
-          <div className="max-w-6xl mx-auto px-4 text-center">
-            <p className="text-xs text-gray-500">
-              © 2025 Not For Resale. Tutti i diritti riservati.
-            </p>
-          </div>
-        </footer>
       </div>
     </>
   )
 }
-
-// ===================================================================
-// MAIN EXPORT WITH SUSPENSE
-// ===================================================================
 
 export default function ThankYouPage() {
   return (
