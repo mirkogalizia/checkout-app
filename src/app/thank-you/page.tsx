@@ -169,62 +169,102 @@ function ThankYouContent() {
         }
 
         // ===================================================================
-        // FIREBASE ANALYTICS
+        // FIREBASE ANALYTICS - ✅ VERSIONE COMPLETA
         // ===================================================================
 
         const saveAnalytics = async () => {
           try {
-            console.log('[ThankYou] 💾 Salvataggio analytics su Firebase...')
+            console.log('[ThankYou] 💾 Salvataggio analytics completi su Firebase...')
             
             const cartAttrs = data.rawCart?.attributes || {}
             
+            // ✅ DATI COMPLETI PER ANALYTICS
             const analyticsData = {
               orderId: processedOrderData.shopifyOrderId || sessionId,
               orderNumber: processedOrderData.shopifyOrderNumber || null,
               sessionId: sessionId,
               timestamp: new Date().toISOString(),
+              
+              // ✅ VALORI DETTAGLIATI
               value: finalTotal / 100,
+              valueCents: finalTotal,
+              subtotalCents: subtotal,
+              shippingCents: shipping,
+              discountCents: discount,
               currency: data.currency || 'EUR',
-              items: (data.items || []).map((item: any) => ({
-                id: String(item.id || item.variant_id),
-                title: item.title,
-                quantity: item.quantity,
-                price: (item.priceCents || 0) / 100,
-              })),
-              customer: {
-                email: data.customer?.email || null,
-                city: data.customer?.city || null,
-                country: data.customer?.countryCode || null,
-              },
+              itemCount: (data.items || []).length,
+              
+              // ✅ UTM LAST CLICK (con fbclid e gclid)
               utm: {
                 source: cartAttrs._wt_last_source || null,
                 medium: cartAttrs._wt_last_medium || null,
                 campaign: cartAttrs._wt_last_campaign || null,
                 content: cartAttrs._wt_last_content || null,
                 term: cartAttrs._wt_last_term || null,
+                fbclid: cartAttrs._wt_last_fbclid || null,
+                gclid: cartAttrs._wt_last_gclid || null,
               },
+              
+              // ✅ UTM FIRST CLICK (con referrer e landing page)
               utm_first: {
                 source: cartAttrs._wt_first_source || null,
                 medium: cartAttrs._wt_first_medium || null,
                 campaign: cartAttrs._wt_first_campaign || null,
                 content: cartAttrs._wt_first_content || null,
                 term: cartAttrs._wt_first_term || null,
+                referrer: cartAttrs._wt_first_referrer || null,
+                landing: cartAttrs._wt_first_landing || null,
+                fbclid: cartAttrs._wt_first_fbclid || null,
+                gclid: cartAttrs._wt_first_gclid || null,
               },
+              
+              // ✅ CUSTOMER COMPLETO
+              customer: {
+                email: processedOrderData.email || null,
+                fullName: data.customer?.fullName || null,
+                city: data.customer?.city || null,
+                postalCode: data.customer?.postalCode || null,
+                countryCode: data.customer?.countryCode || null,
+              },
+              
+              // ✅ ITEMS COMPLETI (con tutti i dettagli)
+              items: (data.items || []).map((item: any) => ({
+                id: item.id || item.variant_id,
+                title: item.title,
+                quantity: item.quantity,
+                priceCents: item.priceCents || 0,
+                linePriceCents: item.linePriceCents || 0,
+                image: item.image || null,
+                variantTitle: item.variantTitle || null,
+              })),
+              
+              // ✅ SHOP DOMAIN
+              shopDomain: data.shopDomain || 'notforresale.it',
             }
 
-            const analyticsRes = await fetch('/api/save-analytics', {
+            console.log('[ThankYou] 📊 Analytics payload:')
+            console.log('[ThankYou]    - Order:', analyticsData.orderNumber || 'pending')
+            console.log('[ThankYou]    - Value:', analyticsData.value, analyticsData.currency)
+            console.log('[ThankYou]    - Items:', analyticsData.itemCount)
+            console.log('[ThankYou]    - UTM Last:', analyticsData.utm.campaign || 'direct')
+            console.log('[ThankYou]    - UTM First:', analyticsData.utm_first.campaign || 'direct')
+
+            // ✅ ENDPOINT CORRETTO
+            const analyticsRes = await fetch('/api/analytics/purchase', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(analyticsData),
+              body: JSON.stringify(analyticsData)
             })
 
             if (analyticsRes.ok) {
-              console.log('[ThankYou] ✅ Analytics salvate su Firebase')
+              const result = await analyticsRes.json()
+              console.log('[ThankYou] ✅ Analytics salvate su Firebase - ID:', result.id)
             } else {
-              console.error('[ThankYou] ⚠️ Errore salvataggio analytics')
+              const errorData = await analyticsRes.json()
+              console.error('[ThankYou] ⚠️ Errore salvataggio analytics:', errorData)
             }
           } catch (err) {
-            console.error('[ThankYou] ⚠️ Errore salvataggio analytics:', err)
+            console.error('[ThankYou] ⚠️ Errore chiamata analytics:', err)
           }
         }
 
@@ -236,7 +276,7 @@ function ThankYouContent() {
 
         if (data.rawCart?.id || data.rawCart?.token) {
           const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
-          console.log('[ThankYou] 🧹 Vidage du panier')
+          console.log('[ThankYou] 🧹 Svuotamento carrello')
           
           try {
             const clearRes = await fetch('/api/clear-cart', {
@@ -251,19 +291,21 @@ function ThankYouContent() {
             const clearData = await clearRes.json()
 
             if (clearRes.ok) {
-              console.log('[ThankYou] ✅ Panier vidé avec succès')
+              console.log('[ThankYou] ✅ Carrello svuotato con successo')
               setCartCleared(true)
             } else {
-              console.error('[ThankYou] ⚠️ Erreur vidage:', clearData.error)
+              console.error('[ThankYou] ⚠️ Errore svuotamento:', clearData.error)
             }
           } catch (clearErr) {
-            console.error('[ThankYou] ⚠️ Erreur appel clear-cart:', clearErr)
+            console.error('[ThankYou] ⚠️ Errore chiamata clear-cart:', clearErr)
           }
+        } else {
+          console.log('[ThankYou] ℹ️ Nessun carrello da svuotare')
         }
 
         setLoading(false)
       } catch (err: any) {
-        console.error("[ThankYou] Erreur chargement commande:", err)
+        console.error("[ThankYou] Errore caricamento ordine:", err)
         setError(err.message)
         setLoading(false)
       }
@@ -301,7 +343,7 @@ function ThankYouContent() {
           </svg>
           <h1 className="text-2xl font-bold text-gray-900">Ordine non trovato</h1>
           <p className="text-gray-600">{error}</p>
-          <a
+          
             href={`https://${orderData?.shopDomain || 'nfrcheckout.com'}`}
             className="inline-block mt-4 px-6 py-3 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition"
           >
@@ -491,7 +533,7 @@ function ThankYouContent() {
 
           {/* Action Buttons */}
           <div className="space-y-3 mt-6">
-            <a
+            
               href={`https://${orderData.shopDomain || 'nfrcheckout.com'}`}
               className="block w-full py-3 px-4 bg-gray-900 text-white text-center font-medium rounded-md hover:bg-gray-800 transition"
             >
