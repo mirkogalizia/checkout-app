@@ -111,7 +111,6 @@ function ThankYouContent() {
           
           if ((window as any).fbq) {
             try {
-              // ✅ SOLO PAGEVIEW (Purchase già inviato dal webhook)
               ;(window as any).fbq('track', 'PageView')
               console.log('[ThankYou] ✅ Facebook Pixel PageView inviato')
               console.log('[ThankYou] ℹ️ Purchase già tracciato dal webhook Stripe con UTM')
@@ -168,7 +167,7 @@ function ThankYouContent() {
         }
 
         // ===================================================================
-        // FIREBASE ANALYTICS - ✅ VERSIONE COMPLETA
+        // FIREBASE ANALYTICS - ✅ VERSIONE COMPLETA CON PARAMETRI ADS
         // ===================================================================
 
         const saveAnalytics = async () => {
@@ -193,7 +192,7 @@ function ThankYouContent() {
               currency: data.currency || 'EUR',
               itemCount: (data.items || []).length,
               
-              // ✅ UTM LAST CLICK (con fbclid e gclid)
+              // ✅ UTM LAST CLICK (con fbclid, gclid E PARAMETRI ADS)
               utm: {
                 source: cartAttrs._wt_last_source || null,
                 medium: cartAttrs._wt_last_medium || null,
@@ -202,9 +201,15 @@ function ThankYouContent() {
                 term: cartAttrs._wt_last_term || null,
                 fbclid: cartAttrs._wt_last_fbclid || null,
                 gclid: cartAttrs._wt_last_gclid || null,
+                // ✅ NUOVI PARAMETRI ADS
+                campaign_id: cartAttrs._wt_last_campaign_id || null,
+                adset_id: cartAttrs._wt_last_adset_id || null,
+                adset_name: cartAttrs._wt_last_adset_name || null,
+                ad_id: cartAttrs._wt_last_ad_id || null,
+                ad_name: cartAttrs._wt_last_ad_name || null,
               },
               
-              // ✅ UTM FIRST CLICK (con referrer e landing page)
+              // ✅ UTM FIRST CLICK (con referrer, landing page E PARAMETRI ADS)
               utm_first: {
                 source: cartAttrs._wt_first_source || null,
                 medium: cartAttrs._wt_first_medium || null,
@@ -215,6 +220,12 @@ function ThankYouContent() {
                 landing: cartAttrs._wt_first_landing || null,
                 fbclid: cartAttrs._wt_first_fbclid || null,
                 gclid: cartAttrs._wt_first_gclid || null,
+                // ✅ NUOVI PARAMETRI ADS
+                campaign_id: cartAttrs._wt_first_campaign_id || null,
+                adset_id: cartAttrs._wt_first_adset_id || null,
+                adset_name: cartAttrs._wt_first_adset_name || null,
+                ad_id: cartAttrs._wt_first_ad_id || null,
+                ad_name: cartAttrs._wt_first_ad_name || null,
               },
               
               // ✅ CUSTOMER COMPLETO
@@ -245,8 +256,11 @@ function ThankYouContent() {
             console.log('[ThankYou]    - Order:', analyticsData.orderNumber || 'pending')
             console.log('[ThankYou]    - Value:', analyticsData.value, analyticsData.currency)
             console.log('[ThankYou]    - Items:', analyticsData.itemCount)
-            console.log('[ThankYou]    - UTM Last:', analyticsData.utm.campaign || 'direct')
-            console.log('[ThankYou]    - UTM First:', analyticsData.utm_first.campaign || 'direct')
+            console.log('[ThankYou]    - UTM Last Campaign:', analyticsData.utm.campaign || 'direct')
+            console.log('[ThankYou]    - UTM Last Campaign ID:', analyticsData.utm.campaign_id || 'N/A')
+            console.log('[ThankYou]    - UTM Last AdSet:', analyticsData.utm.adset_name || 'N/A')
+            console.log('[ThankYou]    - UTM Last Ad Name:', analyticsData.utm.ad_name || 'N/A')
+            console.log('[ThankYou]    - UTM First Campaign:', analyticsData.utm_first.campaign || 'direct')
 
             // ✅ ENDPOINT CORRETTO
             const analyticsRes = await fetch('/api/analytics/purchase', {
