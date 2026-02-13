@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       query = query.where('timestamp', '<=', endDateTime.toISOString())
     }
 
-    const snapshot = await query.limit(limit).get()
+    const snapshot = await query.limit(limit * 2).get() // x2 per gestire duplicati
 
     // Query di confronto (se richiesta)
     let compareSnapshot = null
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
       const compareEndDateTime = new Date(compareEndDate)
       compareEndDateTime.setHours(23, 59, 59, 999)
       compareQuery = compareQuery.where('timestamp', '<=', compareEndDateTime.toISOString())
-      compareSnapshot = await compareQuery.limit(limit).get()
+      compareSnapshot = await compareQuery.limit(limit * 2).get()
     }
 
     if (snapshot.empty) {
@@ -71,7 +71,8 @@ export async function GET(req: NextRequest) {
           recentPurchases: [],
           dailyRevenue: [],
           hourlyRevenue: [],
-          comparison: null
+          comparison: null,
+          meta: { deduplicatedCount: 0, duplicatesRemoved: 0 }
         },
         {
           status: 200,
@@ -83,12 +84,92 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const purchases = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }))
+    // ═══════════════════════════════════════════════════════════
+    // ✅ DEDUPLICA ORDINI (FIX PRINCIPALE)
+    // ═══════════════════════════════════════════════════════════
+    const uniqueOrders = new Map()
+    let duplicatesRemoved = 0
 
-    console.log(`[Dashboard API] 📦 ${purchases.length} purchases trovati`)
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data()
+      const orderId = data.orderId || data.shopifyOrderId || data.sessionId
+
+      if (!orderId) {
+        console.warn('[Dashboard API] ⚠️ Ordine senza ID, skip:', doc.id)
+        return
+      }
+
+      // Se già esiste, tieni quello con più dati
+      if (!uniqueOrders.has(orderId)) {
+        uniqueOrders.set(orderId, { id: doc.id, ...data })
+      } else {
+        duplicatesRemoved++
+        const existing = uniqueOrders.get(orderId)
+        
+        // Aggiorna se il nuovo ha orderNumber e il vecchio no
+        if (data.orderNumber && !existing.orderNumber) {
+          uniqueOrders.set(orderId, { id: doc.id, ...data })
+        }
+      }
+    })
+
+    const purchases = Array.from(uniqueOrders.values())
+
+    console.log(`[Dashboard API] 📦 Ordini totali: ${snapshot.size}`)
+    console.log(`[Dashboard API] ✅ Ordini unici: ${purchases.length}`)
+    console.log(`[Dashboard API] 🗑️ Duplicati rimossi: ${duplicatesRemoved}`)
+
+    // ═══════════════════════════════════════════════════════════
+    // ✅ NORMALIZZA SORGENTI (Facebook/Instagram/notforresale.it → Meta)
+    // ═══════════════════════════════════════════════════════════
+    const normalizeSource = (purchase: any) => {
+      const source = (purchase.utm?.source || "").toLowerCase()
+      const medium = (purchase.utm?.medium || "").toLowerCase()
+      const campaignId = purchase.utm?.campaign_id || ""
+
+      // Se ha Campaign ID Meta (formato 1202...) → Meta
+      if (campaignId && /^120\d{12,}$/.test(campaignId)) {
+        return "Meta"
+      }
+
+      // Facebook/Instagram espliciti
+      if (source === "facebook" || source === "ig" || source === "instagram" || source === "fb") {
+        return "Meta"
+      }
+
+      // Referral da notforresale.it con campaign ID = Meta Ads
+      if (source.includes("notforresale.it") && campaignId) {
+        return "Meta"
+      }
+
+      // Medium paid = probabile Meta se source è ambiguo
+      if (medium === "paid" && !source.includes("google") && !source.includes("tiktok")) {
+        return "Meta"
+      }
+
+      // Google
+      if (source.includes("google") || source.includes("bing")) {
+        return "Google"
+      }
+
+      // Direct/Organic
+      if (!source || source === "direct" || source === "(direct)") {
+        return "Direct"
+      }
+
+      // Referral generico
+      if (source.includes("www.") || source.includes(".com") || source.includes(".it")) {
+        return "Referral"
+      }
+
+      // Capitalizza prima lettera
+      return source.charAt(0).toUpperCase() + source.slice(1)
+    }
+
+    // Applica normalizzazione
+    purchases.forEach((purchase: any) => {
+      purchase.normalizedSource = normalizeSource(purchase)
+    })
 
     // ═══════════════════════════════════════════════════════════
     // AGGREGAZIONI
@@ -113,17 +194,22 @@ export async function GET(req: NextRequest) {
         customerEmails.add(purchase.customer.email)
       }
 
-      // Aggregazione per campagna
+      // ✅ USA SORGENTE NORMALIZZATA
       const campaign = purchase.utm?.campaign || 'direct'
-      const source = purchase.utm?.source || 'direct'
+      const source = purchase.normalizedSource || 'Direct'
       const medium = purchase.utm?.medium || 'none'
-      const campaignKey = `${source}/${medium}/${campaign}`
+      const campaignId = purchase.utm?.campaign_id || ''
 
+      // ✅ CHIAVE UNIVOCA: Campaign ID (se esiste) altrimenti Campaign + Source
+      const campaignKey = campaignId || `${source}__${campaign}`
+
+      // Aggregazione per campagna
       if (!byCampaign[campaignKey]) {
         byCampaign[campaignKey] = {
           campaign,
           source,
           medium,
+          campaignId: campaignId || null,
           purchases: 0,
           revenue: 0,
           orders: []
@@ -135,10 +221,12 @@ export async function GET(req: NextRequest) {
       byCampaign[campaignKey].orders.push({
         orderNumber: purchase.orderNumber,
         value,
-        timestamp: purchase.timestamp
+        timestamp: purchase.timestamp,
+        adSet: purchase.utm?.adset_name || null,
+        adName: purchase.utm?.ad_name || null,
       })
 
-      // Aggregazione per sorgente
+      // Aggregazione per sorgente (normalizzata)
       if (!bySource[source]) {
         bySource[source] = {
           source,
@@ -150,8 +238,8 @@ export async function GET(req: NextRequest) {
       bySource[source].revenue += value
 
       // Aggregazione per ad
-      if (purchase.utm?.content) {
-        const adId = purchase.utm.content
+      const adId = purchase.utm?.ad_id || purchase.utm?.content || null
+      if (adId) {
         if (!byAd[adId]) {
           byAd[adId] = {
             adId,
@@ -184,25 +272,24 @@ export async function GET(req: NextRequest) {
       }
 
       // ═══════════════════════════════════════════════════════════
-      // ✅ NUOVA AGGREGAZIONE: CAMPAGNA CON AD SET E AD NAME
+      // ✅ AGGREGAZIONE DETTAGLIATA CAMPAGNE (con Ad Set e Ad Name)
       // ═══════════════════════════════════════════════════════════
       
-      // ✅ Leggi i dati dal posto giusto (purchase.utm)
       const adsetName = purchase.utm?.adset_name || null
       const adName = purchase.utm?.ad_name || null
-      const campaignId = purchase.utm?.campaign_id || null
       const adsetId = purchase.utm?.adset_id || null
-      const adId = purchase.utm?.ad_id || null
       const fbclid = purchase.utm?.fbclid || null
       const gclid = purchase.utm?.gclid || null
 
-      const campaignDetailKey = `${source}__${campaign}`
+      // ✅ USA Campaign ID come chiave se disponibile
+      const campaignDetailKey = campaignId || `${source}__${campaign}`
 
       if (!byCampaignDetail[campaignDetailKey]) {
         byCampaignDetail[campaignDetailKey] = {
           campaign,
           source,
           medium,
+          campaignId: campaignId || null,
           orders: [],
           totalRevenue: 0,
           totalOrders: 0,
@@ -218,7 +305,6 @@ export async function GET(req: NextRequest) {
         sessionId: purchase.sessionId,
         value,
         timestamp: purchase.timestamp,
-        // ✅ Tutti i parametri ads
         adSet: adsetName,
         adName: adName,
         campaignId: campaignId,
@@ -260,12 +346,13 @@ export async function GET(req: NextRequest) {
     const productStats = Object.values(byProduct)
       .sort((a: any, b: any) => b.revenue - a.revenue)
 
-    // ✅ Ordina campaignDetailStats
+    // ✅ Campaign Detail Stats (ordinati)
     const campaignDetailStats = Object.values(byCampaignDetail)
       .map((camp: any) => ({
         campaign: camp.campaign,
         source: camp.source,
         medium: camp.medium,
+        campaignId: camp.campaignId,
         totalRevenue: parseFloat(camp.totalRevenue.toFixed(2)),
         totalOrders: camp.totalOrders,
         cpa: camp.totalOrders > 0 
@@ -289,16 +376,22 @@ export async function GET(req: NextRequest) {
     }))
 
     // ═══════════════════════════════════════════════════════════
-    // COMPARISON DATA
+    // ✅ COMPARISON DATA (con deduplica)
     // ═══════════════════════════════════════════════════════════
 
     let comparison = null
     if (compareSnapshot && !compareSnapshot.empty) {
-      const comparePurchases = compareSnapshot.docs.map((doc: any) => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      // Deduplica anche il periodo di confronto
+      const compareUnique = new Map()
+      compareSnapshot.docs.forEach((doc: any) => {
+        const data = doc.data()
+        const orderId = data.orderId || data.shopifyOrderId || data.sessionId
+        if (orderId && !compareUnique.has(orderId)) {
+          compareUnique.set(orderId, data)
+        }
+      })
 
+      const comparePurchases = Array.from(compareUnique.values())
       const compareRevenue = comparePurchases.reduce((sum: number, p: any) => sum + (p.value || 0), 0)
       const compareCount = comparePurchases.length
       const compareAvgOrder = compareCount > 0 ? compareRevenue / compareCount : 0
@@ -327,20 +420,25 @@ export async function GET(req: NextRequest) {
       byCampaign: campaignStats,
       bySource: sourceStats,
       byAd: adStats,
-      byProduct: productStats.slice(0, 10), // Top 10 prodotti
-      byCampaignDetail: campaignDetailStats,  // ✅ NUOVO! Con Ad Set e Ad Name
-      recentPurchases: purchases.slice(0, 20),
+      byProduct: productStats.slice(0, 10),
+      byCampaignDetail: campaignDetailStats,
+      recentPurchases: purchases.slice(0, 50),
       dailyRevenue: dailyRevenueArray,
       hourlyRevenue: hourlyRevenueArray,
       comparison,
       dateRange: {
         start: startDate || 'all',
         end: endDate || 'all'
+      },
+      meta: {
+        deduplicatedCount: purchases.length,
+        duplicatesRemoved: duplicatesRemoved,
       }
     }
 
     console.log('[Dashboard API] ✅ Analytics elaborate')
-    console.log(`[Dashboard API] 📊 Campagne con dettagli: ${campaignDetailStats.length}`)
+    console.log(`[Dashboard API] 📊 Campagne uniche: ${campaignStats.length}`)
+    console.log(`[Dashboard API] 🎯 Campagne con dettagli: ${campaignDetailStats.length}`)
 
     return NextResponse.json(response, {
       status: 200,
