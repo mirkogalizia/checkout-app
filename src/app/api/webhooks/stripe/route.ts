@@ -290,20 +290,41 @@ async function sendMetaPurchaseEvent({
       userData.country = hashData(cleanCountry)
     }
 
-    // ✅ COOKIE Meta (se disponibili dai metadata Stripe)
-    if (paymentIntent.metadata?.fbp) {
+    // ═══════════════════════════════════════════════════════════
+    // ✅ FIX v3.1: COOKIE Meta - prima dal carrello, poi fallback metadata Stripe
+    // ═══════════════════════════════════════════════════════════
+    if (cartAttrs._wt_fbp) {
+      userData.fbp = cartAttrs._wt_fbp
+      console.log('[stripe-webhook] 🍪 fbp trovato nel carrello:', userData.fbp)
+    } else if (paymentIntent.metadata?.fbp) {
       userData.fbp = paymentIntent.metadata.fbp
       console.log('[stripe-webhook] 🍪 fbp trovato nei metadata')
     }
-    if (paymentIntent.metadata?.fbc) {
+
+    if (cartAttrs._wt_fbc) {
+      userData.fbc = cartAttrs._wt_fbc
+      console.log('[stripe-webhook] 🍪 fbc trovato nel carrello:', userData.fbc)
+    } else if (paymentIntent.metadata?.fbc) {
       userData.fbc = paymentIntent.metadata.fbc
       console.log('[stripe-webhook] 🍪 fbc trovato nei metadata')
     }
     
-    // ✅ RICOSTRUISCI fbc da fbclid se manca ma fbclid è presente
+    // ═══════════════════════════════════════════════════════════
+    // ✅ FIX v3.1: RICOSTRUISCI fbc con CLICK TIME ORIGINALE
+    // PRIMA: usava eventTime (tempo del purchase) → ERRORE creationTime 96%
+    // ORA: usa il timestamp di quando l'utente ha cliccato l'ad
+    // ═══════════════════════════════════════════════════════════
     if (!userData.fbc && utmData.fbclid) {
-      userData.fbc = `fb.1.${eventTime}.${utmData.fbclid}`
-      console.log('[stripe-webhook] 🍪 fbc ricostruito da fbclid salvato nel carrello')
+      const clickTimeMs = cartAttrs._wt_last_click_time || cartAttrs._wt_first_click_time
+      
+      if (clickTimeMs) {
+        const clickTimeSec = Math.floor(Number(clickTimeMs) / 1000)
+        userData.fbc = `fb.1.${clickTimeSec}.${utmData.fbclid}`
+        console.log('[stripe-webhook] 🍪 fbc ricostruito con CLICK TIME originale:', clickTimeSec)
+      } else {
+        // ⚠️ Meglio NON mandare fbc che mandarlo con timestamp sbagliato
+        console.log('[stripe-webhook] ⚠️ Click time non disponibile, skip fbc (evita errore creationTime)')
+      }
     }
 
     // ✅ CUSTOM DATA (parametri acquisto + UTM)
@@ -348,6 +369,8 @@ async function sendMetaPurchaseEvent({
     console.log('[stripe-webhook]    - Value:', customData.value, customData.currency)
     console.log('[stripe-webhook]    - UTM Campaign:', utmData.campaign || 'direct')
     console.log('[stripe-webhook]    - UTM Source:', utmData.source || 'direct')
+    console.log('[stripe-webhook]    - fbp:', userData.fbp || 'N/A')
+    console.log('[stripe-webhook]    - fbc:', userData.fbc || 'N/A')
 
     // ✅ INVIO A META
     const response = await fetch(
