@@ -92,12 +92,10 @@ export async function GET(req: NextRequest) {
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data()
-      const orderId = data.orderId || data.shopifyOrderId || data.sessionId
+      // ✅ FIX: usa doc.id come fallback invece di skippare ordini
+      const orderId = data.orderId || data.shopifyOrderId || data.sessionId || doc.id
 
-      if (!orderId) {
-        console.warn('[Dashboard API] ⚠️ Ordine senza ID, skip:', doc.id)
-        return
-      }
+      // Ora orderId è SEMPRE valorizzato, non skippa mai ordini
 
       // Se già esiste, tieni quello con più dati
       if (!uniqueOrders.has(orderId)) {
@@ -385,8 +383,9 @@ export async function GET(req: NextRequest) {
       const compareUnique = new Map()
       compareSnapshot.docs.forEach((doc: any) => {
         const data = doc.data()
-        const orderId = data.orderId || data.shopifyOrderId || data.sessionId
-        if (orderId && !compareUnique.has(orderId)) {
+        // ✅ FIX: usa doc.id come fallback anche qui
+        const orderId = data.orderId || data.shopifyOrderId || data.sessionId || doc.id
+        if (!compareUnique.has(orderId)) {
           compareUnique.set(orderId, data)
         }
       })
@@ -464,4 +463,3 @@ export async function GET(req: NextRequest) {
     )
   }
 }
-
