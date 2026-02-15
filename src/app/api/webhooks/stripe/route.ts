@@ -251,9 +251,7 @@ async function sendMetaPurchaseEvent({
     })
 
     // ✅ EVENT ID SINCRONIZZATO (uguale a quello che userà thank-you page)
-    // CRITICO: Deve essere identico per la deduplica!
     const eventId = orderId ? `order_${orderId}` : paymentIntent.id
-
     console.log('[stripe-webhook] 🎯 Event ID per deduplica:', eventId)
 
     const eventTime = Math.floor(Date.now() / 1000)
@@ -291,7 +289,7 @@ async function sendMetaPurchaseEvent({
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ✅ FIX v3.1: COOKIE Meta - prima dal carrello, poi fallback metadata Stripe
+    // COOKIE Meta: prima dal carrello, poi fallback metadata Stripe
     // ═══════════════════════════════════════════════════════════
     if (cartAttrs._wt_fbp) {
       userData.fbp = cartAttrs._wt_fbp
@@ -310,19 +308,25 @@ async function sendMetaPurchaseEvent({
     }
     
     // ═══════════════════════════════════════════════════════════
-    // ✅ FIX v3.1: RICOSTRUISCI fbc con CLICK TIME ORIGINALE
-    // PRIMA: usava eventTime (tempo del purchase) → ERRORE creationTime 96%
-    // ORA: usa il timestamp di quando l'utente ha cliccato l'ad
+    // ✅ FIX: RICOSTRUISCI fbc CON creation_time IN MILLISECONDI
+    // Formato richiesto: fb.1.creationTime.fbclid (version.subdomainIndex.creationTime.fbclid). [web:2][web:18][web:30]
+    // creationTime = Unix time in millisecondi quando hai salvato _fbc
+    // o quando hai visto per la prima volta il fbclid. [web:30][web:38]
     // ═══════════════════════════════════════════════════════════
     if (!userData.fbc && utmData.fbclid) {
-      const clickTimeMs = cartAttrs._wt_last_click_time || cartAttrs._wt_first_click_time
-      
-      if (clickTimeMs) {
-        const clickTimeSec = Math.floor(Number(clickTimeMs) / 1000)
-        userData.fbc = `fb.1.${clickTimeSec}.${utmData.fbclid}`
-        console.log('[stripe-webhook] 🍪 fbc ricostruito con CLICK TIME originale:', clickTimeSec)
+      const clickTimeRaw = cartAttrs._wt_last_click_time || cartAttrs._wt_first_click_time
+
+      if (clickTimeRaw) {
+        let creationTimeMs = Number(clickTimeRaw)
+
+        // Se sembra un timestamp in secondi (< 10^11), convertilo in ms
+        if (creationTimeMs < 1e11) {
+          creationTimeMs = creationTimeMs * 1000
+        }
+
+        userData.fbc = `fb.1.${creationTimeMs}.${utmData.fbclid}`
+        console.log('[stripe-webhook] 🍪 fbc ricostruito (ms):', creationTimeMs)
       } else {
-        // ⚠️ Meglio NON mandare fbc che mandarlo con timestamp sbagliato
         console.log('[stripe-webhook] ⚠️ Click time non disponibile, skip fbc (evita errore creationTime)')
       }
     }
@@ -330,9 +334,8 @@ async function sendMetaPurchaseEvent({
     // ✅ CUSTOM DATA (parametri acquisto + UTM)
     const customData: any = {
       value: paymentIntent.amount / 100,
-      currency: (paymentIntent.currency || 'EUR').toUpperCase(),
+      currency: (paymentIntent.currency || 'EUR').toUpperCase(), // ISO 4217 a 3 lettere. [web:43][web:42]
       content_type: 'product',
-      // ✅ AGGIUNGI UTM PER TRACKING CAMPAGNE
       utm_source: utmData.source || undefined,
       utm_medium: utmData.medium || undefined,
       utm_campaign: utmData.campaign || undefined,
@@ -354,8 +357,8 @@ async function sendMetaPurchaseEvent({
     const payload = {
       data: [{
         event_name: 'Purchase',
-        event_time: eventTime,
-        event_id: eventId, // ← Deduplica con thank-you page
+        event_time: eventTime, // Unix seconds quando è avvenuto l'evento. [web:42]
+        event_id: eventId,
         event_source_url: `https://nfrcheckout.com/thank-you?sessionId=${sessionId}`,
         action_source: 'website',
         user_data: userData,
@@ -372,7 +375,6 @@ async function sendMetaPurchaseEvent({
     console.log('[stripe-webhook]    - fbp:', userData.fbp || 'N/A')
     console.log('[stripe-webhook]    - fbc:', userData.fbc || 'N/A')
 
-    // ✅ INVIO A META
     const response = await fetch(
       `https://graph.facebook.com/v18.0/${pixelId}/events`,
       {
@@ -390,7 +392,6 @@ async function sendMetaPurchaseEvent({
       console.log('[stripe-webhook] 📊 Events received:', result.events_received)
       console.log('[stripe-webhook] 🎯 FBTRACE ID:', result.fbtrace_id)
 
-      // ✅ SALVA TRACKING INFO SU FIREBASE
       try {
         await db.collection(COLLECTION).doc(sessionId).update({
           'tracking.webhook': {
@@ -476,9 +477,7 @@ async function createShopifyOrder({
     console.log(`[createShopifyOrder] 📦 Prodotti: ${items.length}`)
     console.log(`[createShopifyOrder] 👤 Cliente: ${customer.email || 'N/A'}`)
 
-    // ═══════════════════════════════════════════════════════════
-    // ✅ CERCA CLIENTE ESISTENTE SU SHOPIFY (FIX TELEFONO DUPLICATO)
-    // ═══════════════════════════════════════════════════════════
+    // ✅ CERCA CLIENTE ESISTENTE SU SHOPIFY
     let existingCustomerId: number | null = null
 
     if (customer.email) {
@@ -559,9 +558,6 @@ async function createShopifyOrder({
     const firstName = nameParts[0] || "Cliente"
     const lastName = nameParts.slice(1).join(" ") || "Checkout"
 
-    // ═══════════════════════════════════════════════════════════
-    // ✅ PAYLOAD ORDINE CON GESTIONE CLIENTE ESISTENTE
-    // ═══════════════════════════════════════════════════════════
     const orderPayload: any = {
       order: {
         email: customer.email || "noreply@notforresale.it",
@@ -620,8 +616,6 @@ async function createShopifyOrder({
       },
     }
 
-    // ✅ SE CLIENTE ESISTE → USA IL SUO ID (evita duplicati telefono)
-    // ALTRIMENTI → CREA NUOVO CLIENTE
     if (existingCustomerId) {
       orderPayload.order.customer = { id: existingCustomerId }
       console.log(`[createShopifyOrder] 🔗 Collego ordine al cliente esistente: ${existingCustomerId}`)
@@ -660,14 +654,12 @@ async function createShopifyOrder({
         const errorData = JSON.parse(responseText)
         console.error("[createShopifyOrder] Errori:", JSON.stringify(errorData, null, 2))
         
-        // ✅ FALLBACK: Se ancora errore telefono duplicato, riprova SENZA customer
         if (errorData.errors?.['customer.phone_number'] || 
             errorData.errors?.phone || 
             JSON.stringify(errorData).includes('phone')) {
           
           console.log('[createShopifyOrder] ⚠️ Errore telefono, riprovo senza campo customer...')
           
-          // Rimuovi completamente il blocco customer
           delete orderPayload.order.customer
           
           const retryResponse = await fetch(
