@@ -1,9 +1,8 @@
-// src/app/dashboard/page.tsx
+// src/app/analytics/page.tsx
 "use client"
 
 import { useEffect, useState } from "react"
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
-import { Lock } from 'lucide-react'
 
 // ✅ TYPES AGGIORNATI CON NUOVI CAMPI ADS
 type DashboardData = {
@@ -43,6 +42,7 @@ type DashboardData = {
     revenue: number
     orders: number
   }>
+  // ✅ NUOVO: Dettagli campagne con tutti i parametri ads
   byCampaignDetail: Array<{
     campaign: string
     source: string
@@ -110,14 +110,6 @@ const COLORS = {
 const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899']
 
 export default function DashboardPage() {
-  // ✅ AUTH STATES
-  const [password, setPassword] = useState('')
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [authError, setAuthError] = useState('')
-  const [authLoading, setAuthLoading] = useState(false)
-  const [loadingAuth, setLoadingAuth] = useState(true)
-
-  // Dashboard states
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [darkMode, setDarkMode] = useState(false)
@@ -136,51 +128,6 @@ export default function DashboardPage() {
     start: '',
     end: ''
   })
-
-  // ✅ CHECK AUTH AL MOUNT
-  useEffect(() => {
-    const savedAuth = localStorage.getItem('dashboardAuth');
-    if (savedAuth === 'true') {
-      setIsAuthenticated(true);
-      setLoadingAuth(false);
-    } else {
-      setLoadingAuth(false);
-    }
-  }, []);
-
-  // ✅ HANDLER LOGIN
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthLoading(true);
-    setAuthError('');
-    
-    try {
-      const res = await fetch('/api/admin/verify-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      
-      if (res.ok) {
-        setIsAuthenticated(true);
-        localStorage.setItem('dashboardAuth', 'true');
-      } else {
-        const data = await res.json();
-        setAuthError(data.error || 'Password non corretta');
-      }
-    } catch (err) {
-      setAuthError('Errore di connessione');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  // ✅ LOGOUT
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem('dashboardAuth');
-    setPassword('');
-  };
 
   // ✅ CALCOLA KPI AVANZATI
   const calculateAdvancedKPIs = (data: DashboardData) => {
@@ -399,6 +346,7 @@ export default function DashboardPage() {
       
       setData(json)
       
+      // ✅ Genera insights
       const kpis = calculateAdvancedKPIs(json)
       if (kpis) {
         const newInsights = generateInsights(json, kpis)
@@ -418,26 +366,25 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadData()
-    }
-  }, [isAuthenticated])
+    loadData()
+  }, [])
 
   useEffect(() => {
-    if (!autoRefresh || !isAuthenticated) return
+    if (!autoRefresh) return
     
     const interval = setInterval(() => {
       loadData(true)
     }, 30000)
     
     return () => clearInterval(interval)
-  }, [autoRefresh, dateRange, compareRange, showComparison, data, isAuthenticated])
+  }, [autoRefresh, dateRange, compareRange, showComparison, data])
 
   const showNotification = (message: string) => {
     setNotification(message)
     setTimeout(() => setNotification(null), 4000)
   }
 
+  // ✅ EXPORT CSV AGGIORNATO CON NUOVI CAMPI ADS
   const exportCSV = () => {
     if (!data) return
     
@@ -537,67 +484,6 @@ export default function DashboardPage() {
     }
   }
 
-  // ✅ SCHERMATA LOGIN
-  if (loadingAuth) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-300">Verifica autenticazione...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex items-center justify-center p-4">
-        <div className="bg-gray-800 rounded-lg shadow-2xl p-8 max-w-md w-full border border-gray-700">
-          <div className="text-center mb-6">
-            <Lock className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-white">🔒 Dashboard Analytics</h1>
-            <p className="text-sm text-gray-400 mt-2">Inserisci ADMIN_SECRET_KEY per accedere</p>
-          </div>
-          
-          <form onSubmit={handleAuth} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Password Admin
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Inserisci ADMIN_SECRET_KEY"
-                required
-                disabled={authLoading}
-              />
-            </div>
-
-            {authError && (
-              <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-3 rounded-lg text-sm">
-                ❌ {authError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition duration-200"
-              disabled={authLoading}
-            >
-              {authLoading ? 'Verifica in corso...' : 'Accedi'}
-            </button>
-          </form>
-          
-          <p className="text-xs text-gray-500 text-center mt-4">
-            Usa la password configurata su Vercel come variabile ADMIN_SECRET_KEY
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   if (loading) {
     return (
       <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} flex items-center justify-center`}>
@@ -670,12 +556,6 @@ export default function DashboardPage() {
                 }`}
               >
                 {darkMode ? '☀️' : '🌙'}
-              </button>
-              <button
-                onClick={handleLogout}
-                className="px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-xs sm:text-sm font-medium"
-              >
-                🚪 Logout
               </button>
               <a
                 href="https://notforresale.it"
@@ -1074,7 +954,7 @@ export default function DashboardPage() {
                   dataKey="campaign" 
                   stroke={darkMode ? '#9CA3AF' : '#6B7280'} 
                   angle={-45} 
-                  textAnchor="end"
+                  textAnchor="end" 
                   height={100}
                   tick={{ fontSize: 11 }}
                 />
@@ -1086,13 +966,13 @@ export default function DashboardPage() {
                     borderRadius: '8px'
                   }}
                   formatter={(value: any, name?: string) => {
-  if (name === 'revenue') return [formatMoney(value), 'Revenue']
-  return [value, 'Ordini']
-}}
+                    if (name === 'revenue') return [formatMoney(value), 'Revenue']
+                    return [value, 'Ordini']
+                  }}
                 />
-                <Legend />
-                <Bar dataKey="revenue" fill="#3B82F6" name="Revenue" />
-                <Bar dataKey="purchases" fill="#10B981" name="Ordini" />
+                <Legend wrapperStyle={{ fontSize: '14px' }} />
+                <Bar dataKey="purchases" fill="#3B82F6" name="Ordini" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="revenue" fill="#10B981" name="Revenue" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -1100,49 +980,377 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Recent Orders Table */}
-        <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-4 sm:p-6`}>
-          <h2 className="text-lg sm:text-xl font-semibold mb-4">📦 Ordini Recenti</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className={`border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                  <th className="text-left py-3 px-2">Ordine</th>
-                  <th className="text-left py-3 px-2">Data</th>
-                  <th className="text-left py-3 px-2">Valore</th>
-                  <th className="text-left py-3 px-2">Campagna</th>
-                  <th className="text-left py-3 px-2">Sorgente</th>
+        {/* ✅ REVENUE PER ORA */}
+        <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border p-4 sm:p-6 mb-6 sm:mb-8`}>
+          <h2 className="text-lg sm:text-xl font-semibold mb-4">🕐 Revenue per Ora del Giorno</h2>
+          {data.hourlyRevenue.some(h => h.revenue > 0) ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={data.hourlyRevenue}>
+                <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#E5E7EB'} />
+                <XAxis 
+                  dataKey="hour" 
+                  stroke={darkMode ? '#9CA3AF' : '#6B7280'} 
+                  tickFormatter={(hour) => `${hour}:00`}
+                  tick={{ fontSize: 12 }}
+                />
+                <YAxis stroke={darkMode ? '#9CA3AF' : '#6B7280'} tick={{ fontSize: 12 }} />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: darkMode ? '#1F2937' : '#FFFFFF', 
+                    border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, 
+                    borderRadius: '8px'
+                  }}
+                  formatter={(value: any) => [formatMoney(value), 'Revenue']}
+                  labelFormatter={(hour: any) => `Ore ${hour}:00`}
+                />
+                <Bar dataKey="revenue" fill="#8B5CF6" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>Nessun dato disponibile</p>
+          )}
+        </div>
+
+        {/* ✅ TOP PRODOTTI */}
+        {data.byProduct.length > 0 && (
+          <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-6 sm:mb-8 overflow-hidden`}>
+            <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg sm:text-xl font-semibold">🏆 Top 10 Prodotti</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prodotto</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Quantità</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">% Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                  {data.byProduct.map((product, idx) => (
+                    <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl flex-shrink-0">
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '•'}
+                          </span>
+                          <span className="text-sm font-medium">{product.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm">{product.quantity}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm">{product.orders}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm font-semibold text-green-600">{formatMoney(product.revenue)}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm">{((product.revenue / data.totalRevenue) * 100).toFixed(1)}%</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ NUOVA TABELLA: DETTAGLIO CAMPAGNE CON TUTTI I PARAMETRI ADS */}
+        {data.byCampaignDetail && data.byCampaignDetail.length > 0 && (
+          <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-6 sm:mb-8 overflow-hidden`}>
+            <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg sm:text-xl font-semibold">🎯 Dettaglio Campagne con Ad Set e Ad Name</h2>
+              <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                Tutti i parametri pubblicitari per ogni ordine
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sorgente</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagna</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campaign ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Set Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Set ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad ID</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">AOV</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                  {data.byCampaignDetail.map((campaign, idx) => {
+                    // Prendi il primo ordine per mostrare i dettagli ads
+                    const firstOrder = campaign.orders[0]
+                    
+                    return (
+                      <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span 
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                            style={{
+                              backgroundColor: `${getSourceBadgeColor(campaign.source)}20`,
+                              color: getSourceBadgeColor(campaign.source)
+                            }}
+                          >
+                            {campaign.source}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-sm font-medium">{campaign.campaign}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          {firstOrder?.campaignId ? (
+                            <span className="text-xs font-mono text-purple-600 dark:text-purple-400">
+                              {firstOrder.campaignId}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {firstOrder?.adSet ? (
+                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              📊 {firstOrder.adSet}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {firstOrder?.adsetId ? (
+                            <span className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                              {firstOrder.adsetId}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {firstOrder?.adName ? (
+                            <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                              📢 {firstOrder.adName}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {firstOrder?.adId ? (
+                            <span className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                              {firstOrder.adId}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <span className="text-sm font-semibold">{campaign.totalOrders}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <span className="text-sm font-semibold text-green-600">{formatMoney(campaign.totalRevenue)}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <span className="text-sm">{formatMoney(campaign.cpa)}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ PERFORMANCE PER AD */}
+        {data.byAd.length > 0 && (
+          <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border mb-6 sm:mb-8 overflow-hidden`}>
+            <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg sm:text-xl font-semibold">🎨 Performance per Ad</h2>
+              <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                Basato su utm_content (Ad ID)
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad ID</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Campagna</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sorgente</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ordini</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">AOV</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                  {data.byAd.map((ad, idx) => (
+                    <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-mono font-medium">{ad.adId}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">{ad.campaign}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span 
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                          style={{
+                            backgroundColor: `${getSourceBadgeColor(ad.source)}20`,
+                            color: getSourceBadgeColor(ad.source)
+                          }}
+                        >
+                          {ad.source}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm">{ad.purchases}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm font-semibold text-green-600">{formatMoney(ad.revenue)}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <span className="text-sm">{formatMoney(ad.revenue / ad.purchases)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Recent Orders */}
+        <div className={`${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg shadow-sm border overflow-hidden`}>
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-lg sm:text-xl font-semibold">🛒 Ultimi Acquisti</h2>
+          </div>
+          
+          {/* Desktop Table */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full">
+              <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ordine</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cliente</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sorgente / Campagna</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Set</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ad Name</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Valore</th>
                 </tr>
               </thead>
-              <tbody>
-                {data.recentPurchases.slice(0, 20).map((order: any, idx: number) => (
-                  <tr key={idx} className={`border-b ${darkMode ? 'border-gray-700' : 'border-gray-100'}`}>
-                    <td className="py-3 px-2 font-mono text-xs">
-                      {order.shopifyOrderNumber || order.orderNumber || 'N/A'}
-                    </td>
-                    <td className="py-3 px-2 text-xs">
-                      {order.timestamp ? formatDate(order.timestamp) : 'N/A'}
-                    </td>
-                    <td className="py-3 px-2 font-semibold text-green-600">
-                      {formatMoney((order.valueCents || order.value * 100 || 0) / 100)}
-                    </td>
-                    <td className="py-3 px-2 text-xs">
-                      {order.utm?.campaign || 'direct'}
-                    </td>
-                    <td className="py-3 px-2">
-                      <span 
-                        className="inline-block px-2 py-1 rounded text-xs font-medium text-white"
-                        style={{ backgroundColor: getSourceBadgeColor(order.utm?.source || 'direct') }}
-                      >
-                        {order.utm?.source || 'direct'}
-                      </span>
+              <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                {data.recentPurchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                      Nessun ordine recente
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  data.recentPurchases.map((purchase, idx) => {
+                    const orderValue = (purchase.valueCents || purchase.value * 100 || 0) / 100
+                    const utm = purchase.utm || {}
+                    
+                    return (
+                      <tr key={idx} className={darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-sm font-medium">#{purchase.shopifyOrderNumber || purchase.orderNumber || '---'}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-sm">{formatDate(purchase.timestamp)}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-sm">{purchase.customer?.email || 'N/A'}</span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex flex-col gap-1">
+                            <span 
+                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium w-fit"
+                              style={{
+                                backgroundColor: `${getSourceBadgeColor(utm.source || 'direct')}20`,
+                                color: getSourceBadgeColor(utm.source || 'direct')
+                              }}
+                            >
+                              {utm.source || 'direct'}
+                            </span>
+                            <span className="text-xs text-gray-500">{utm.campaign || 'N/A'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          {utm.adset_name ? (
+                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              📊 {utm.adset_name}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {utm.ad_name ? (
+                            <span className="text-xs text-gray-600 dark:text-gray-300">
+                              📢 {utm.ad_name}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <span className="text-sm font-semibold text-green-600">{formatMoney(orderValue)}</span>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
               </tbody>
             </table>
           </div>
+
+          {/* Mobile Cards */}
+          <div className="block sm:hidden divide-y dark:divide-gray-700">
+            {data.recentPurchases.slice(0, 10).map((purchase, idx) => {
+              const orderValue = (purchase.valueCents || purchase.value * 100 || 0) / 100
+              const utm = purchase.utm || {}
+              
+              return (
+                <div key={idx} className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <span className="text-sm font-bold">#{purchase.shopifyOrderNumber || purchase.orderNumber || '---'}</span>
+                      <p className="text-xs text-gray-500 mt-1">{formatDate(purchase.timestamp)}</p>
+                    </div>
+                    <span className="text-lg font-bold text-green-600">{formatMoney(orderValue)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span 
+                      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      style={{
+                        backgroundColor: `${getSourceBadgeColor(utm.source || 'direct')}20`,
+                        color: getSourceBadgeColor(utm.source || 'direct')
+                      }}
+                    >
+                      {utm.source || 'direct'}
+                    </span>
+                    <span className="text-xs text-gray-500">{utm.campaign || 'N/A'}</span>
+                  </div>
+                  {utm.adset_name && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">📊 {utm.adset_name}</p>
+                  )}
+                  {utm.ad_name && (
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">📢 {utm.ad_name}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
+
       </div>
 
       {/* Animations */}
