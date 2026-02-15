@@ -1085,10 +1085,10 @@ export default function DashboardPage() {
                     border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, 
                     borderRadius: '8px'
                   }}
-                  formatter={(value: any, name: string) => {
-                    if (name === 'revenue') return [formatMoney(value), 'Revenue']
-                    return [value, 'Ordini']
-                  }}
+                  formatter={(value: any, name?: string) => {
+  if (name === 'revenue') return [formatMoney(value), 'Revenue']
+  return [value, 'Ordini']
+}}
                 />
                 <Legend />
                 <Bar dataKey="revenue" fill="#3B82F6" name="Revenue" />
