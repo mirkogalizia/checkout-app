@@ -136,7 +136,7 @@ function ThankYouContent() {
             const cartAttrs = data.rawCart?.attributes || {}
             
             ;(window as any).gtag('event', 'conversion', {
-              'send_to': 'AW-17391033186/G-u0CLKyxbsbEOK22ORA',
+              'send_to': 'AW-17925038279/z6Q7CIeWzPkbEMfBqeNC',
               'value': orderTotal,
               'currency': data.currency || 'EUR',
               'transaction_id': orderId,
@@ -386,9 +386,9 @@ function ThankYouContent() {
         `}
       </Script>
 
-      {/* ✅ GOOGLE ADS */}
+      {/* ✅ GOOGLE ADS - TAG CORRETTO */}
       <Script
-        src="https://www.googletagmanager.com/gtag/js?id=AW-17391033186"
+        src="https://www.googletagmanager.com/gtag/js?id=AW-17925038279"
         strategy="afterInteractive"
       />
       <Script
@@ -399,8 +399,8 @@ function ThankYouContent() {
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'AW-17391033186');
-            console.log('[ThankYou] ✅ Google Tag inizializzato');
+            gtag('config', 'AW-17925038279');
+            console.log('[ThankYou] ✅ Google Tag AW-17925038279 inizializzato');
           `,
         }}
       />
