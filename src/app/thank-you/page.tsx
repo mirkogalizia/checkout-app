@@ -37,6 +37,9 @@ type OrderData = {
     city?: string
     postalCode?: string
     countryCode?: string
+    address1?: string
+    address2?: string
+    province?: string
   }
 }
 
@@ -69,6 +72,9 @@ const COLOR_MAP: Record<string, string> = {
   sand: "#c4b49a", verde: "#3a6b35",
   rosso: "#c8251f", red: "#c8251f",
   blu: "#1a3a7a", blue: "#1a3a7a",
+  "sport grey": "#9ea5a8",
+  "sport gray": "#9ea5a8",
+  "dark chocolate": "#3d1f10",
 }
 
 function UpsellBlock({ sessionId }: { sessionId: string }) {
@@ -109,7 +115,6 @@ function UpsellBlock({ sessionId }: { sessionId: string }) {
   }, [selectedIdx, products])
 
   const currentProduct = products[selectedIdx]
-
   const matchedVariant = currentProduct?.variants.find((v) =>
     v.selectedOptions.every((o) => selectedOptions[o.name] === o.value)
   )
@@ -117,269 +122,87 @@ function UpsellBlock({ sessionId }: { sessionId: string }) {
   const fullPriceCents = activeVariant?.priceCents || 0
   const discountedCents = Math.round(fullPriceCents / 2)
   const savedCents = fullPriceCents - discountedCents
-
-  const fmt = (cents: number) =>
-    "€" + (cents / 100).toFixed(2).replace(".", ",")
+  const fmt = (cents: number) => "€" + (cents / 100).toFixed(2).replace(".", ",")
 
   const handleAdd = async () => {
-    if (!currentProduct || !activeVariant) return
-    if (!activeVariant.availableForSale) {
-      setError("Questa variante non è disponibile")
-      return
-    }
-    setAdding(true)
-    setError(null)
-
+    if (!currentProduct || !activeVariant?.availableForSale) { setError("Variante non disponibile"); return }
+    setAdding(true); setError(null)
     try {
       const res = await fetch("/api/upsell-charge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          variantId: activeVariant.id,
-          variantTitle: activeVariant.title,
-          productTitle: currentProduct.title,
-          priceCents: discountedCents,
-          image: currentProduct.image,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, variantId: activeVariant.id, variantTitle: activeVariant.title, productTitle: currentProduct.title, priceCents: discountedCents, image: currentProduct.image }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || "Errore durante l'aggiunta")
-        return
-      }
+      if (!res.ok) { setError(data.error || "Errore"); return }
       setDone(true)
-    } catch {
-      setError("Errore di connessione. Riprova.")
-    } finally {
-      setAdding(false)
-    }
+    } catch { setError("Errore di connessione. Riprova.") }
+    finally { setAdding(false) }
   }
 
-  if (loading) return null
+  if (loading || !currentProduct) return null
 
-  if (done) {
-    return (
-      <div style={{
-        marginTop: 24,
-        background: "linear-gradient(135deg, #0d3320 0%, #0a2018 100%)",
-        border: "1px solid #1a7a40",
-        borderRadius: 16,
-        padding: 28,
-        textAlign: "center",
-      }}>
-        <div style={{
-          width: 56, height: 56,
-          background: "#1a7a40", borderRadius: "50%",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          margin: "0 auto 14px",
-          fontSize: 24, color: "#fff",
-        }}>✓</div>
-        <p style={{ color: "#fff", fontWeight: 900, fontSize: 20, marginBottom: 6 }}>
-          Aggiunto al tuo ordine!
-        </p>
-        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
-          Riceverai conferma via email. Il prodotto verrà spedito con il tuo ordine.
-        </p>
-      </div>
-    )
-  }
-
-  if (!currentProduct) return null
+  if (done) return (
+    <div style={{ background: "linear-gradient(135deg,#0d2e1a,#0a1f12)", border: "1px solid #1d5c30", borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
+      <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
+      <p style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 6, fontFamily: "Georgia,serif" }}>Aggiunto al tuo ordine!</p>
+      <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 14, margin: 0 }}>Conferma via email. Spedito insieme al tuo ordine.</p>
+    </div>
+  )
 
   return (
-    <div style={{
-      marginTop: 24,
-      background: "linear-gradient(160deg, #0a0a0a 0%, #141414 100%)",
-      borderRadius: 16,
-      overflow: "hidden",
-      border: "1px solid #222",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-    }}>
-
-      {/* Header */}
-      <div style={{
-        background: "#c8251f",
-        padding: "11px 20px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>⚡</span>
-          <span style={{ color: "#fff", fontWeight: 900, fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase" }}>
-            Offerta esclusiva — Solo per te
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>Sconto</span>
-          <span style={{
-            background: "#fff", color: "#c8251f",
-            fontWeight: 900, fontSize: 14,
-            padding: "2px 10px", borderRadius: 4,
-          }}>−50%</span>
-        </div>
+    <div style={{ background: "#0a0a0a", borderRadius: 20, overflow: "hidden", border: "1px solid #1e1e1e" }}>
+      <div style={{ background: "linear-gradient(90deg,#c8251f,#a01c18)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase" }}>⚡ Offerta esclusiva post-acquisto</span>
+        <span style={{ background: "#fff", color: "#c8251f", fontWeight: 900, fontSize: 13, padding: "2px 12px", borderRadius: 20 }}>−50%</span>
       </div>
-
       <div style={{ padding: 20 }}>
-        <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 10, letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 16 }}>
-          Aggiunto con un click · Nessun reindirizzamento
-        </p>
-
-        {/* Tabs prodotti */}
         {products.length > 1 && (
           <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
             {products.map((p, i) => (
-              <button
-                key={p.handle}
-                onClick={() => setSelectedIdx(i)}
-                style={{
-                  flex: 1,
-                  padding: "9px 8px",
-                  background: selectedIdx === i ? "#fff" : "rgba(255,255,255,0.07)",
-                  color: selectedIdx === i ? "#0a0a0a" : "rgba(255,255,255,0.5)",
-                  border: selectedIdx === i ? "none" : "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 8,
-                  fontSize: 10,
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  textTransform: "uppercase",
-                  letterSpacing: ".06em",
-                  transition: "all .15s",
-                  lineHeight: 1.3,
-                }}
-              >
-                {i === 0 ? "🧥 Felpa" : "👕 T-Shirt"}
+              <button key={p.handle} onClick={() => setSelectedIdx(i)} style={{ flex: 1, padding: "10px 8px", background: selectedIdx === i ? "#fff" : "rgba(255,255,255,0.06)", color: selectedIdx === i ? "#000" : "rgba(255,255,255,0.45)", border: "none", borderRadius: 10, fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: ".06em", transition: "all .15s" }}>
+                {i === 0 ? "🧥 Hoodie" : "👕 T-Shirt"}
               </button>
             ))}
           </div>
         )}
-
-        {/* Prodotto */}
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-
-          {/* Immagine */}
           {currentProduct.image && (
-            <div style={{
-              width: 120, flexShrink: 0,
-              aspectRatio: "1/1",
-              background: "#f2f2f0",
-              borderRadius: 10,
-              overflow: "hidden",
-              position: "relative",
-            }}>
-              <img
-                src={currentProduct.image}
-                alt={currentProduct.title}
-                style={{ width: "100%", height: "100%", objectFit: "contain", padding: 8, display: "block" }}
-              />
-              <div style={{
-                position: "absolute", top: 0, left: 0, right: 0,
-                background: "#c8251f", color: "#fff",
-                fontSize: 9, fontWeight: 900,
-                textAlign: "center", padding: "4px 0",
-                letterSpacing: ".06em",
-              }}>−50%</div>
+            <div style={{ width: 116, flexShrink: 0, aspectRatio: "1/1", background: "#f2f2f0", borderRadius: 12, overflow: "hidden", position: "relative" }}>
+              <img src={currentProduct.image} alt={currentProduct.title} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 8, display: "block" }} />
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "#c8251f", color: "#fff", fontSize: 9, fontWeight: 900, textAlign: "center", padding: "4px 0", letterSpacing: ".08em" }}>−50%</div>
             </div>
           )}
-
-          {/* Info */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{
-              color: "#fff", fontWeight: 800, fontSize: 13,
-              textTransform: "uppercase", lineHeight: 1.25, marginBottom: 10,
-            }}>
-              {currentProduct.title}
-            </p>
-
-            {/* Prezzo */}
+            <p style={{ color: "#fff", fontWeight: 700, fontSize: 13, textTransform: "uppercase", lineHeight: 1.3, marginBottom: 10 }}>{currentProduct.title}</p>
             <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 30, fontWeight: 900, color: "#fff", lineHeight: 1 }}>
-                  {fmt(discountedCents)}
-                </span>
-                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.3)", textDecoration: "line-through" }}>
-                  {fmt(fullPriceCents)}
-                </span>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 28, fontWeight: 900, color: "#fff", lineHeight: 1 }}>{fmt(discountedCents)}</span>
+                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.28)", textDecoration: "line-through" }}>{fmt(fullPriceCents)}</span>
               </div>
-              <div style={{ marginTop: 6 }}>
-                <span style={{
-                  display: "inline-block",
-                  background: "rgba(200,37,31,0.2)",
-                  border: "1px solid rgba(200,37,31,0.5)",
-                  color: "#ff6b6b",
-                  fontSize: 11, fontWeight: 800,
-                  padding: "3px 10px", borderRadius: 4,
-                }}>
-                  🔥 Risparmi {fmt(savedCents)}
-                </span>
-              </div>
+              <span style={{ display: "inline-block", marginTop: 6, background: "rgba(200,37,31,0.18)", border: "1px solid rgba(200,37,31,0.4)", color: "#ff7070", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20 }}>
+                🔥 Risparmi {fmt(savedCents)}
+              </span>
             </div>
-
-            {/* Selettori opzioni */}
             {currentProduct.options.map((opt) => {
               const isColor = opt.name.toLowerCase().includes("col") || opt.name.toLowerCase() === "color"
               return (
-                <div key={opt.name} style={{ marginBottom: 12 }}>
-                  <p style={{
-                    color: "rgba(255,255,255,0.4)", fontSize: 9,
-                    fontWeight: 700, letterSpacing: ".18em",
-                    textTransform: "uppercase", marginBottom: 7,
-                  }}>
-                    {opt.name}:{" "}
-                    <span style={{ color: "#fff" }}>{selectedOptions[opt.name] || "—"}</span>
+                <div key={opt.name} style={{ marginBottom: 10 }}>
+                  <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 6 }}>
+                    {opt.name}: <span style={{ color: "#fff" }}>{selectedOptions[opt.name] || "—"}</span>
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {opt.values.map((val) => {
-                      const available = currentProduct.variants.some(
-                        (v) => v.availableForSale &&
-                          v.selectedOptions.some((o) => o.name === opt.name && o.value === val)
-                      )
+                      const available = currentProduct.variants.some((v) => v.availableForSale && v.selectedOptions.some((o) => o.name === opt.name && o.value === val))
                       const selected = selectedOptions[opt.name] === val
                       const colorBg = COLOR_MAP[val.toLowerCase()]
-
                       if (isColor && colorBg) {
-                        const isLight = ["#fafafa", "#f0ebe0", "#d4c5a9", "#c4b49a"].includes(colorBg)
+                        const isLight = ["#fafafa","#f0ebe0","#d4c5a9","#c4b49a","#9ea5a8"].includes(colorBg)
                         return (
-                          <button
-                            key={val}
-                            title={val}
-                            onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))}
-                            style={{
-                              width: 30, height: 30,
-                              borderRadius: "50%",
-                              background: colorBg,
-                              border: selected
-                                ? "3px solid #fff"
-                                : isLight ? "2px solid rgba(255,255,255,0.3)" : "2px solid rgba(255,255,255,0.15)",
-                              cursor: available ? "pointer" : "not-allowed",
-                              opacity: available ? 1 : 0.25,
-                              transform: selected ? "scale(1.18)" : "scale(1)",
-                              boxShadow: selected ? "0 0 0 3px rgba(255,255,255,0.4)" : "none",
-                              transition: "all .12s",
-                              flexShrink: 0,
-                            }}
-                          />
+                          <button key={val} title={val} onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))} style={{ width: 28, height: 28, borderRadius: "50%", background: colorBg, border: selected ? "2.5px solid #fff" : isLight ? "1.5px solid rgba(255,255,255,0.3)" : "1.5px solid rgba(255,255,255,0.1)", cursor: available ? "pointer" : "not-allowed", opacity: available ? 1 : 0.2, transform: selected ? "scale(1.2)" : "scale(1)", boxShadow: selected ? "0 0 0 3px rgba(255,255,255,0.35)" : "none", transition: "all .12s", flexShrink: 0 }} />
                         )
                       }
-
                       return (
-                        <button
-                          key={val}
-                          onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))}
-                          style={{
-                            height: 30, minWidth: 38, padding: "0 10px",
-                            background: selected ? "#fff" : "rgba(255,255,255,0.07)",
-                            color: selected ? "#0a0a0a" : available ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.2)",
-                            border: selected ? "2px solid #fff" : "1.5px solid rgba(255,255,255,0.12)",
-                            borderRadius: 4,
-                            fontSize: 11, fontWeight: 700,
-                            textTransform: "uppercase", letterSpacing: ".04em",
-                            cursor: available ? "pointer" : "not-allowed",
-                            textDecoration: available ? "none" : "line-through",
-                            transition: "all .12s",
-                          }}
-                        >
+                        <button key={val} onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))} style={{ height: 28, minWidth: 36, padding: "0 9px", background: selected ? "#fff" : "rgba(255,255,255,0.07)", color: selected ? "#000" : available ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.18)", border: selected ? "2px solid #fff" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: available ? "pointer" : "not-allowed", textDecoration: available ? "none" : "line-through", transition: "all .12s" }}>
                           {val}
                         </button>
                       )
@@ -390,420 +213,222 @@ function UpsellBlock({ sessionId }: { sessionId: string }) {
             })}
           </div>
         </div>
-
-        {/* Errore */}
-        {error && (
-          <div style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            background: "rgba(200,37,31,0.12)",
-            border: "1px solid rgba(200,37,31,0.35)",
-            borderRadius: 8,
-            color: "#ff8080",
-            fontSize: 12,
-          }}>
-            ⚠️ {error}
-          </div>
-        )}
-
-        {/* CTA */}
-        <button
-          onClick={handleAdd}
-          disabled={adding}
-          style={{
-            marginTop: 18,
-            width: "100%",
-            height: 54,
-            background: adding ? "#333" : "linear-gradient(135deg, #fff 0%, #f0f0f0 100%)",
-            color: adding ? "rgba(255,255,255,0.5)" : "#0a0a0a",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 900,
-            letterSpacing: ".07em",
-            textTransform: "uppercase",
-            cursor: adding ? "not-allowed" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            transition: "all .15s",
-            boxShadow: adding ? "none" : "0 4px 16px rgba(255,255,255,0.15)",
-          }}
-        >
-          {adding ? (
-            <>
-              <svg
-                style={{ width: 18, height: 18, animation: "upsell-spin 1s linear infinite" }}
-                fill="none" viewBox="0 0 24 24"
-              >
-                <circle style={{ opacity: .25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path style={{ opacity: .75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Addebito in corso...
-            </>
-          ) : (
-            <>
-              ⚡ Aggiungi ora · paga solo {fmt(discountedCents)}
-            </>
-          )}
+        {error && <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(200,37,31,0.12)", border: "1px solid rgba(200,37,31,0.3)", borderRadius: 8, color: "#ff8080", fontSize: 12 }}>⚠️ {error}</div>}
+        <button onClick={handleAdd} disabled={adding} style={{ marginTop: 16, width: "100%", height: 52, background: adding ? "#222" : "#fff", color: adding ? "rgba(255,255,255,0.4)" : "#000", border: "none", borderRadius: 12, fontSize: 13, fontWeight: 900, letterSpacing: ".07em", textTransform: "uppercase", cursor: adding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all .15s", boxShadow: adding ? "none" : "0 4px 20px rgba(255,255,255,0.12)" }}>
+          {adding ? (<><svg style={{ width: 16, height: 16, animation: "ty-spin 1s linear infinite" }} fill="none" viewBox="0 0 24 24"><circle style={{ opacity: .2 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path style={{ opacity: .7 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Addebito...</>) : <>⚡ Aggiungi ora · solo {fmt(discountedCents)}</>}
         </button>
-
-        <p style={{
-          textAlign: "center",
-          color: "rgba(255,255,255,0.25)",
-          fontSize: 10,
-          marginTop: 8,
-          letterSpacing: ".04em",
-        }}>
-          🔒 Addebito sicuro sulla carta già usata · Spedizione inclusa
-        </p>
+        <p style={{ textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 10, marginTop: 8, letterSpacing: ".04em" }}>🔒 Carta già usata · Nessun reindirizzamento · Spedizione inclusa</p>
       </div>
-
-      <style>{`
-        @keyframes upsell-spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
 }
 
-// ════════════════════════════════════════════════════════════════
-// MAIN PAGE
-// ════════════════════════════════════════════════════════════════
-
 function ThankYouContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId")
-
   const [orderData, setOrderData] = useState<OrderData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [cartCleared, setCartCleared] = useState(false)
+  const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    async function loadOrderDataAndClearCart() {
-      if (!sessionId) {
-        setError("Sessione non valida")
-        setLoading(false)
-        return
-      }
-
+    async function load() {
+      if (!sessionId) { setError("Sessione non valida"); setLoading(false); return }
       try {
         const res = await fetch(`/api/cart-session?sessionId=${sessionId}`)
         const data = await res.json()
-
         if (!res.ok) throw new Error(data.error || "Errore caricamento ordine")
-
-        console.log("[ThankYou] 📦 Dati carrello ricevuti:", data)
-
         const subtotal = data.subtotalCents || 0
         const shipping = 590
         let discount = 0
         if (data.totalCents && data.totalCents < subtotal) discount = subtotal - data.totalCents
         const finalTotal = subtotal - discount + shipping
-
-        const processedOrderData = {
-          shopifyOrderNumber: data.shopifyOrderNumber,
-          shopifyOrderId: data.shopifyOrderId,
-          email: data.customer?.email,
-          subtotalCents: subtotal,
-          shippingCents: shipping,
-          discountCents: discount,
-          totalCents: finalTotal,
-          currency: data.currency || "EUR",
-          shopDomain: data.shopDomain,
-          paymentIntentId: data.paymentIntentId,
-          rawCart: data.rawCart,
-          items: data.items || [],
-          customer: data.customer,
-        }
-
-        setOrderData(processedOrderData)
-
-        // Facebook PageView
-        if (typeof window !== "undefined" && (window as any).fbq) {
-          try { (window as any).fbq("track", "PageView") } catch {}
-        }
-
-        // Google Ads
-        const sendGoogleConversion = () => {
-          if ((window as any).gtag) {
-            const cartAttrs = data.rawCart?.attributes || {}
-            ;(window as any).gtag("event", "conversion", {
-              send_to: "AW-17960095093/dvWzCKSd8fsbEPWahfRC",
-              value: finalTotal / 100,
-              currency: data.currency || "EUR",
-              transaction_id: data.shopifyOrderNumber || data.shopifyOrderId || sessionId,
-              utm_source: cartAttrs._wt_last_source || "",
-              utm_medium: cartAttrs._wt_last_medium || "",
-              utm_campaign: cartAttrs._wt_last_campaign || "",
-            })
-          }
-        }
-        if ((window as any).gtag) sendGoogleConversion()
-        else {
-          const t = setInterval(() => { if ((window as any).gtag) { clearInterval(t); sendGoogleConversion() } }, 100)
-          setTimeout(() => clearInterval(t), 5000)
-        }
-
-        // Analytics
-        const cartAttrs = data.rawCart?.attributes || {}
-        fetch("/api/analytics/purchase", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId: data.shopifyOrderId || sessionId,
-            orderNumber: data.shopifyOrderNumber || null,
-            sessionId,
-            timestamp: new Date().toISOString(),
-            value: finalTotal / 100,
-            valueCents: finalTotal,
-            subtotalCents: subtotal,
-            shippingCents: shipping,
-            discountCents: discount,
-            currency: data.currency || "EUR",
-            itemCount: (data.items || []).length,
-            utm: {
-              source: cartAttrs._wt_last_source || null,
-              medium: cartAttrs._wt_last_medium || null,
-              campaign: cartAttrs._wt_last_campaign || null,
-              content: cartAttrs._wt_last_content || null,
-              term: cartAttrs._wt_last_term || null,
-              fbclid: cartAttrs._wt_last_fbclid || null,
-              gclid: cartAttrs._wt_last_gclid || null,
-              campaign_id: cartAttrs._wt_last_campaign_id || null,
-              adset_id: cartAttrs._wt_last_adset_id || null,
-              adset_name: cartAttrs._wt_last_adset_name || null,
-              ad_id: cartAttrs._wt_last_ad_id || null,
-              ad_name: cartAttrs._wt_last_ad_name || null,
-            },
-            utm_first: {
-              source: cartAttrs._wt_first_source || null,
-              medium: cartAttrs._wt_first_medium || null,
-              campaign: cartAttrs._wt_first_campaign || null,
-              content: cartAttrs._wt_first_content || null,
-              referrer: cartAttrs._wt_first_referrer || null,
-              landing: cartAttrs._wt_first_landing || null,
-              fbclid: cartAttrs._wt_first_fbclid || null,
-              gclid: cartAttrs._wt_first_gclid || null,
-              campaign_id: cartAttrs._wt_first_campaign_id || null,
-              adset_id: cartAttrs._wt_first_adset_id || null,
-              ad_name: cartAttrs._wt_first_ad_name || null,
-            },
-            customer: {
-              email: data.customer?.email || null,
-              fullName: data.customer?.fullName || null,
-              city: data.customer?.city || null,
-              postalCode: data.customer?.postalCode || null,
-              countryCode: data.customer?.countryCode || null,
-            },
-            items: (data.items || []).map((item: any) => ({
-              id: item.id || item.variant_id,
-              title: item.title,
-              quantity: item.quantity,
-              priceCents: item.priceCents || 0,
-              linePriceCents: item.linePriceCents || 0,
-            })),
-            shopDomain: data.shopDomain || "notforresale.it",
-          }),
-        }).catch(() => {})
-
-        // Clear cart
-        if (data.rawCart?.id || data.rawCart?.token) {
-          const cartId = data.rawCart.id || `gid://shopify/Cart/${data.rawCart.token}`
-          fetch("/api/clear-cart", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cartId, sessionId }),
-          })
-            .then((r) => r.ok && setCartCleared(true))
-            .catch(() => {})
-        }
-
+        setOrderData({ shopifyOrderNumber: data.shopifyOrderNumber, shopifyOrderId: data.shopifyOrderId, email: data.customer?.email, subtotalCents: subtotal, shippingCents: shipping, discountCents: discount, totalCents: finalTotal, currency: data.currency || "EUR", shopDomain: data.shopDomain, paymentIntentId: data.paymentIntentId, rawCart: data.rawCart, items: data.items || [], customer: data.customer })
+        setTimeout(() => setVisible(true), 50)
+        if (typeof window !== "undefined" && (window as any).fbq) { try { (window as any).fbq("track", "PageView") } catch {} }
+        const sendGA = () => { if (!(window as any).gtag) return; const a = data.rawCart?.attributes || {}; ;(window as any).gtag("event","conversion",{ send_to:"AW-17960095093/dvWzCKSd8fsbEPWahfRC", value: finalTotal/100, currency: data.currency||"EUR", transaction_id: data.shopifyOrderNumber||data.shopifyOrderId||sessionId, utm_source: a._wt_last_source||"", utm_medium: a._wt_last_medium||"", utm_campaign: a._wt_last_campaign||"" }) }
+        if ((window as any).gtag) sendGA(); else { const t = setInterval(()=>{ if ((window as any).gtag){clearInterval(t);sendGA()} },100); setTimeout(()=>clearInterval(t),5000) }
+        const a = data.rawCart?.attributes||{}
+        fetch("/api/analytics/purchase",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ orderId:data.shopifyOrderId||sessionId, orderNumber:data.shopifyOrderNumber||null, sessionId, timestamp:new Date().toISOString(), value:finalTotal/100, valueCents:finalTotal, subtotalCents:subtotal, shippingCents:shipping, discountCents:discount, currency:data.currency||"EUR", itemCount:(data.items||[]).length, utm:{ source:a._wt_last_source||null, medium:a._wt_last_medium||null, campaign:a._wt_last_campaign||null, content:a._wt_last_content||null, fbclid:a._wt_last_fbclid||null, gclid:a._wt_last_gclid||null, campaign_id:a._wt_last_campaign_id||null, adset_id:a._wt_last_adset_id||null, adset_name:a._wt_last_adset_name||null, ad_id:a._wt_last_ad_id||null, ad_name:a._wt_last_ad_name||null }, utm_first:{ source:a._wt_first_source||null, medium:a._wt_first_medium||null, campaign:a._wt_first_campaign||null, referrer:a._wt_first_referrer||null, landing:a._wt_first_landing||null, fbclid:a._wt_first_fbclid||null }, customer:{ email:data.customer?.email||null, fullName:data.customer?.fullName||null, city:data.customer?.city||null, postalCode:data.customer?.postalCode||null, countryCode:data.customer?.countryCode||null }, items:(data.items||[]).map((i:any)=>({ id:i.id||i.variant_id, title:i.title, quantity:i.quantity, priceCents:i.priceCents||0, linePriceCents:i.linePriceCents||0 })), shopDomain:data.shopDomain||"notforresale.it" }) }).catch(()=>{})
+        if (data.rawCart?.id||data.rawCart?.token) { const cartId=data.rawCart.id||`gid://shopify/Cart/${data.rawCart.token}`; fetch("/api/clear-cart",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cartId,sessionId})}).catch(()=>{}) }
         setLoading(false)
-      } catch (err: any) {
-        setError(err.message)
-        setLoading(false)
-      }
+      } catch(err:any) { setError(err.message); setLoading(false) }
     }
-
-    loadOrderDataAndClearCart()
+    load()
   }, [sessionId])
 
-  const formatMoney = (cents: number | undefined) =>
-    new Intl.NumberFormat("it-IT", {
-      style: "currency",
-      currency: orderData?.currency || "EUR",
-      minimumFractionDigits: 2,
-    }).format((cents ?? 0) / 100)
+  const fmt = (cents:number|undefined) => new Intl.NumberFormat("it-IT",{ style:"currency", currency:orderData?.currency||"EUR", minimumFractionDigits:2 }).format((cents??0)/100)
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 mb-4" />
-          <p className="text-sm text-gray-600">Caricamento ordine...</p>
-        </div>
-      </div>
-    )
-  }
+  if (loading) return (
+    <div style={{ minHeight:"100vh", background:"#000", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
+      <img src="https://cdn.shopify.com/s/files/1/0608/1806/3572/files/logo_nfr_bianco.png?v=1719300466" alt="NFR" style={{ height:32, opacity:.5 }} />
+      <div style={{ width:28, height:28, border:"2px solid rgba(255,255,255,0.1)", borderTop:"2px solid #fff", borderRadius:"50%", animation:"ty-spin 0.8s linear infinite" }} />
+      <style>{`@keyframes ty-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
 
-  if (error || !orderData) {
-    return (
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-6 p-8 bg-white rounded-lg shadow-sm border border-gray-200">
-          <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <h1 className="text-2xl font-bold text-gray-900">Ordine non trovato</h1>
-          <p className="text-gray-600">{error}</p>
-          <a href={`https://${orderData?.shopDomain || "nfrcheckout.com"}`} className="inline-block mt-4 px-6 py-3 bg-gray-900 text-white font-medium rounded-md hover:bg-gray-800 transition">
-            Torna al negozio
-          </a>
-        </div>
+  if (error||!orderData) return (
+    <div style={{ minHeight:"100vh", background:"#f5f5f7", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+      <div style={{ maxWidth:400, textAlign:"center" }}>
+        <p style={{ fontSize:48, marginBottom:16 }}>⚠️</p>
+        <h1 style={{ fontSize:22, fontWeight:700, marginBottom:8 }}>Ordine non trovato</h1>
+        <p style={{ color:"#86868b", fontSize:14 }}>{error}</p>
+        <a href={`https://${orderData?.shopDomain||"notforresale.it"}`} style={{ display:"inline-block", marginTop:24, padding:"12px 28px", background:"#000", color:"#fff", borderRadius:10, fontWeight:700, textDecoration:"none" }}>Torna al negozio</a>
       </div>
-    )
-  }
+    </div>
+  )
+
+  const customer = orderData.customer
+  const firstName = customer?.fullName?.split(" ")[0] || "amico"
 
   return (
     <>
-      <Script id="facebook-pixel" strategy="afterInteractive">{`
-        !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-        fbq('init','${process.env.NEXT_PUBLIC_FB_PIXEL_ID}');
-      `}</Script>
+      <Script id="facebook-pixel" strategy="afterInteractive">{`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${process.env.NEXT_PUBLIC_FB_PIXEL_ID}');`}</Script>
       <Script src="https://www.googletagmanager.com/gtag/js?id=AW-17925038279" strategy="afterInteractive" />
-      <Script id="google-ads-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-17925038279');` }} />
+      <Script id="google-ads-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html:`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-17925038279');` }} />
 
-      <div className="min-h-screen bg-[#fafafa] py-12">
-        <div className="max-w-3xl mx-auto px-4">
+      <style>{`
+        @keyframes ty-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+        @keyframes ty-fadein{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+        .ty-fade{opacity:0;animation:ty-fadein .55s ease forwards}
+        .ty-1{animation-delay:.05s}.ty-2{animation-delay:.15s}.ty-3{animation-delay:.25s}.ty-4{animation-delay:.35s}.ty-5{animation-delay:.45s}
+      `}</style>
 
-          {/* ── Ordine confermato ── */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+      <div style={{ minHeight:"100vh", background:"#f5f5f7", fontFamily:"-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif" }}>
 
-            <div className="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mx-auto mb-6">
-              <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+        {/* HEADER */}
+        <div style={{ background:"#000", padding:"18px 24px", textAlign:"center" }}>
+          <img src="https://cdn.shopify.com/s/files/1/0608/1806/3572/files/logo_nfr_bianco.png?v=1719300466" alt="Not For Resale" style={{ height:34, display:"inline-block" }} />
+        </div>
+
+        {/* HERO */}
+        <div style={{ position:"relative", overflow:"hidden", maxHeight:260 }}>
+          <img src="https://img.bayengage.com/b5cc27ebe82e/studio/41162/Kraft-Bubble-Mailer-Mockup-Set-by-Creatsy-8-.jpg" alt="" style={{ width:"100%", display:"block", objectFit:"cover", maxHeight:260, filter:"brightness(0.8)" }} />
+          <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom,rgba(0,0,0,0) 30%,rgba(0,0,0,0.72) 100%)", display:"flex", alignItems:"flex-end", padding:"24px 28px" }}>
+            <div>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.14)", backdropFilter:"blur(10px)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:20, padding:"6px 14px", marginBottom:8 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span style={{ color:"#fff", fontSize:11, fontWeight:700, letterSpacing:".08em" }}>ORDINE CONFERMATO</span>
+              </div>
+              {orderData.shopifyOrderNumber && (
+                <p style={{ color:"rgba(255,255,255,0.6)", fontSize:13, margin:0 }}>Ordine <strong style={{ color:"#fff" }}>#{orderData.shopifyOrderNumber}</strong></p>
+              )}
             </div>
+          </div>
+        </div>
 
-            <h1 className="text-3xl font-bold text-gray-900 text-center mb-2">Ordine Confermato!</h1>
-            <p className="text-center text-gray-600 mb-6">Grazie per il tuo acquisto</p>
+        <div style={{ maxWidth:640, margin:"0 auto", padding:"0 16px 60px" }}>
 
-            {orderData.shopifyOrderNumber && (
-              <div className="bg-gray-50 rounded-lg p-4 mb-6 text-center">
-                <p className="text-sm text-gray-600 mb-1">Numero ordine</p>
-                <p className="text-2xl font-bold text-gray-900">#{orderData.shopifyOrderNumber}</p>
-              </div>
-            )}
-
+          {/* GREETING */}
+          <div className={visible?"ty-fade ty-1":""} style={{ background:"#fff", borderRadius:"0 0 20px 20px", padding:"28px 24px 24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+            <h1 style={{ fontSize:22, fontWeight:700, color:"#1d1d1f", marginBottom:10, fontFamily:"Georgia,'Times New Roman',serif" }}>
+              Ciao {firstName}! 👋
+            </h1>
+            <p style={{ fontSize:15, lineHeight:1.65, color:"#3a3a3c", margin:0 }}>
+              Grazie per aver scelto <strong style={{ color:"#000" }}>Not For Resale</strong>. Il tuo ordine è confermato e il nostro team lo sta preparando con cura.
+            </p>
             {orderData.email && (
-              <div className="border-t border-gray-200 pt-6 mb-6">
-                <div className="flex items-start gap-3">
-                  <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 mb-1">Conferma inviata a</p>
-                    <p className="text-sm text-gray-600">{orderData.email}</p>
-                  </div>
-                </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:16, padding:"12px 16px", background:"#f2f2f7", borderRadius:12 }}>
+                <svg width="15" height="15" fill="none" stroke="#34c759" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                <span style={{ fontSize:13, color:"#3a3a3c" }}>Conferma inviata a <strong>{orderData.email}</strong></span>
               </div>
             )}
+          </div>
 
-            {orderData.items && orderData.items.length > 0 && (
-              <div className="border-t border-gray-200 pt-6 mb-6">
-                <h2 className="text-base font-semibold text-gray-900 mb-4">Prodotti ordinati</h2>
-                <div className="space-y-4">
-                  {orderData.items.map((item, idx) => (
-                    <div key={idx} className="flex gap-4">
-                      {item.image && (
-                        <div className="w-16 h-16 flex-shrink-0 bg-gray-100 rounded border border-gray-200">
-                          <img src={item.image} alt={item.title} className="w-full h-full object-cover rounded" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">{item.title}</p>
-                        {item.variantTitle && <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>}
-                        <p className="text-xs text-gray-500 mt-1">Quantità: {item.quantity}</p>
+          {/* PRODOTTI */}
+          {orderData.items && orderData.items.length > 0 && (
+            <div className={visible?"ty-fade ty-2":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+              <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:18 }}>Il tuo ordine</h2>
+              <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                {orderData.items.map((item,idx) => (
+                  <div key={idx} style={{ display:"flex", gap:14, alignItems:"center" }}>
+                    {item.image && (
+                      <div style={{ width:60, height:60, flexShrink:0, background:"#f2f2f7", borderRadius:10, overflow:"hidden" }}>
+                        <img src={item.image} alt={item.title} style={{ width:"100%", height:"100%", objectFit:"contain", padding:4 }} />
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-medium text-gray-900">{formatMoney(item.linePriceCents || item.priceCents || 0)}</p>
-                      </div>
+                    )}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:14, fontWeight:600, color:"#1d1d1f", marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.title}</p>
+                      {item.variantTitle && <p style={{ fontSize:12, color:"#86868b", marginBottom:2 }}>{item.variantTitle}</p>}
+                      <p style={{ fontSize:12, color:"#86868b" }}>Qtà: {item.quantity}</p>
                     </div>
-                  ))}
-                </div>
+                    <p style={{ fontSize:14, fontWeight:600, color:"#1d1d1f", flexShrink:0 }}>{fmt(item.linePriceCents||item.priceCents||0)}</p>
+                  </div>
+                ))}
               </div>
-            )}
-
-            <div className="border-t border-gray-200 pt-6">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Subtotale</span>
-                  <span className="text-gray-900">{formatMoney(orderData.subtotalCents)}</span>
+              <div style={{ borderTop:"1px solid #f2f2f7", marginTop:20, paddingTop:16, display:"flex", flexDirection:"column", gap:8 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#86868b" }}>
+                  <span>Subtotale</span><span style={{ color:"#1d1d1f" }}>{fmt(orderData.subtotalCents)}</span>
                 </div>
-                {orderData.discountCents && orderData.discountCents > 0 && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Sconto</span>
-                    <span>-{formatMoney(orderData.discountCents)}</span>
+                {(orderData.discountCents||0)>0 && (
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#34c759" }}>
+                    <span>Sconto</span><span>−{fmt(orderData.discountCents)}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Spedizione</span>
-                  <span className="text-gray-900">{formatMoney(orderData.shippingCents)}</span>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#86868b" }}>
+                  <span>Spedizione</span><span style={{ color:"#1d1d1f" }}>{fmt(orderData.shippingCents)}</span>
                 </div>
-                <div className="flex justify-between text-lg font-semibold pt-3 border-t border-gray-200">
-                  <span>Totale</span>
-                  <span className="text-xl">{formatMoney(orderData.totalCents)}</span>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:17, fontWeight:700, color:"#1d1d1f", paddingTop:8, borderTop:"1px solid #f2f2f7" }}>
+                  <span>Totale</span><span>{fmt(orderData.totalCents)}</span>
                 </div>
               </div>
             </div>
+          )}
+
+          {/* INDIRIZZO */}
+          {customer?.address1 && (
+            <div className={visible?"ty-fade ty-3":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+              <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:14 }}>📦 Spedizione a</h2>
+              <div style={{ background:"#f2f2f7", borderRadius:12, padding:"16px 18px", fontSize:14, lineHeight:1.8, color:"#1d1d1f" }}>
+                <strong>{customer.fullName}</strong><br/>
+                {customer.address1}{customer.address2?`, ${customer.address2}`:""}<br/>
+                {customer.postalCode} {customer.city}<br/>
+                {customer.province?`${customer.province} · `:""}{customer.countryCode}
+              </div>
+            </div>
+          )}
+
+          {/* UPSELL */}
+          <div className={visible?"ty-fade ty-4":""}>
+            {sessionId && <UpsellBlock sessionId={sessionId} />}
           </div>
 
-          {/* ── UPSELL ONE-CLICK ── */}
-          {sessionId && <UpsellBlock sessionId={sessionId} />}
-
-          {/* ── Prossimi passi ── */}
-          <div className="bg-blue-50 rounded-lg border border-blue-200 p-6 mt-6">
-            <h2 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Prossimi passi
-            </h2>
-            <ul className="space-y-3 text-sm text-gray-700">
-              <li className="flex items-start gap-2">
-                <span className="text-blue-600 font-semibold">1.</span>
-                <span>Riceverai un&apos;email di conferma con tutti i dettagli</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-600 font-semibold">2.</span>
-                <span>Il tuo ordine verrà elaborato entro 1-2 giorni lavorativi</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-blue-600 font-semibold">3.</span>
-                <span>Riceverai il tracking della spedizione via email</span>
-              </li>
-            </ul>
+          {/* PROSSIMI PASSI */}
+          <div className={visible?"ty-fade ty-4":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginTop:12, marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+            <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:18 }}>Cosa succede ora</h2>
+            {[
+              { icon:"📬", step:"Email di conferma", desc:"Tutti i dettagli del tuo ordine nella tua casella" },
+              { icon:"📦", step:"Preparazione", desc:"Il team prepara il tuo ordine entro 1-2 giorni lavorativi" },
+              { icon:"🚚", step:"Spedizione", desc:"Ricevi il tracking via email non appena parte" },
+            ].map((s,i) => (
+              <div key={i} style={{ display:"flex", gap:14, alignItems:"flex-start", marginBottom:i<2?16:0 }}>
+                <div style={{ width:42, height:42, borderRadius:12, background:"#f2f2f7", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{s.icon}</div>
+                <div>
+                  <p style={{ fontSize:14, fontWeight:600, color:"#1d1d1f", marginBottom:2 }}>{s.step}</p>
+                  <p style={{ fontSize:13, color:"#86868b", margin:0 }}>{s.desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
 
-          {/* ── Action Buttons ── */}
-          <div className="space-y-3 mt-6">
-            <a
-              href={`https://${orderData.shopDomain || "nfrcheckout.com"}`}
-              className="block w-full py-3 px-4 bg-gray-900 text-white text-center font-medium rounded-md hover:bg-gray-800 transition"
-            >
-              Torna al negozio
+          {/* CTA */}
+          <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:12 }}>
+            <a href={`https://${orderData.shopDomain||"notforresale.it"}`} style={{ display:"block", padding:"16px", background:"#000", color:"#fff", textAlign:"center", fontWeight:700, fontSize:15, borderRadius:16, textDecoration:"none", boxSizing:"border-box", boxShadow:"0 4px 16px rgba(0,0,0,0.15)" }}>
+              Continua a fare shopping →
             </a>
           </div>
 
-          {cartCleared && (
-            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-md">
-              <p className="text-xs text-green-800 text-center">✓ Carrello svuotato con successo</p>
-            </div>
-          )}
+          {/* FOOTER */}
+          <div className={visible?"ty-fade ty-5":""} style={{ textAlign:"center", padding:"20px 0 8px" }}>
+            <p style={{ fontSize:13, color:"#86868b", marginBottom:12 }}>
+              Hai bisogno di aiuto?{" "}
+              <a href="mailto:info@notforresale.it" style={{ color:"#000", fontWeight:600, textDecoration:"none" }}>info@notforresale.it</a>
+            </p>
+            <a href="https://www.instagram.com/notforresale_italia/?hl=it" target="_blank" rel="noreferrer">
+              <img src="https://cdn.tools.unlayer.com/social/icons/circle/instagram.png" alt="Instagram" style={{ width:28, opacity:.55 }} />
+            </a>
+            <p style={{ fontSize:11, color:"#c7c7cc", marginTop:16 }}>© {new Date().getFullYear()} Not For Resale · Made with ❤️ in Italy</p>
+          </div>
         </div>
       </div>
     </>
@@ -813,8 +438,9 @@ function ThankYouContent() {
 export default function ThankYouPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
-        <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900" />
+      <div style={{ minHeight:"100vh", background:"#000", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ width:28, height:28, border:"2px solid rgba(255,255,255,0.1)", borderTop:"2px solid #fff", borderRadius:"50%", animation:"ty-spin 0.8s linear infinite" }} />
+        <style>{`@keyframes ty-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
       </div>
     }>
       <ThankYouContent />
