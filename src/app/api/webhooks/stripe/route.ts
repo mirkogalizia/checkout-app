@@ -111,15 +111,22 @@ export async function POST(req: NextRequest) {
         console.log(`[stripe-webhook] 🎉 Ordine creato: #${result.orderNumber} (ID: ${result.orderId})`)
 
         await db.collection(COLLECTION).doc(sessionId).update({
-          shopifyOrderId: result.orderId,
-          shopifyOrderNumber: result.orderNumber,
-          orderCreatedAt: new Date().toISOString(),
-          paymentStatus: "paid",
-          webhookProcessedAt: new Date().toISOString(),
-          stripeAccountUsed: matchedAccount.label,
-        })
+  shopifyOrderId: result.orderId,
+  shopifyOrderNumber: result.orderNumber,
+  orderCreatedAt: new Date().toISOString(),
+  paymentStatus: "paid",
+  webhookProcessedAt: new Date().toISOString(),
+  stripeAccountUsed: matchedAccount.label,
+  // ← AGGIUNTE PER UPSELL ONE-CLICK
+  stripePaymentMethodId: paymentIntent.payment_method ?? null,
+  stripeCustomerId: typeof paymentIntent.customer === "string"
+    ? paymentIntent.customer
+    : null,
+})
 
-        console.log("[stripe-webhook] ✅ Dati salvati in Firebase")
+console.log("[stripe-webhook] ✅ Dati salvati in Firebase")
+console.log(`[stripe-webhook] 💳 PaymentMethod: ${paymentIntent.payment_method}`)
+console.log(`[stripe-webhook] 👤 Customer: ${paymentIntent.customer}`)
 
         // ✅ SALVA STATISTICHE GIORNALIERE
         const today = new Date().toISOString().split('T')[0]
