@@ -411,20 +411,20 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-          --void:    #080808;
-          --deep:    #111111;
-          --surface: #161616;
-          --panel:   #1c1c1c;
-          --border:  #2a2a2a;
-          --border2: #333333;
-          --muted:   #666666;
-          --text:    #d8d8d0;
-          --bright:  #f0ede6;
-          --white:   #faf9f6;
-          --gold:    #d4af37;
-          --gold2:   #b8942a;
-          --red:     #e53e3e;
-          --green:   #2ecc71;
+          --void:    #ffffff;
+          --deep:    #f7f7f5;
+          --surface: #ffffff;
+          --panel:   #f2f2f0;
+          --border:  #e2e2de;
+          --border2: #d0d0cc;
+          --muted:   #888884;
+          --text:    #2a2a2a;
+          --bright:  #0a0a0a;
+          --white:   #ffffff;
+          --gold:    #0a0a0a;
+          --gold2:   #333333;
+          --red:     #c8251f;
+          --green:   #1a7a40;
           --serif:   'Playfair Display', Georgia, serif;
           --sans:    'Outfit', system-ui, sans-serif;
           --r:       3px;
@@ -434,28 +434,17 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
 
         body {
           font-family: var(--sans);
-          background: var(--void);
+          background: var(--deep);
           color: var(--text);
           font-size: 14px;
           line-height: 1.6;
           min-height: 100vh;
         }
 
-        /* ── NOISE TEXTURE OVERLAY ── */
-        body::before {
-          content: '';
-          position: fixed;
-          inset: 0;
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-          pointer-events: none;
-          z-index: 0;
-          opacity: .6;
-        }
-
         /* ── HEADER ── */
         .nfr-header {
           position: sticky; top: 0; z-index: 200;
-          background: rgba(8,8,8,0.92);
+          background: rgba(255,255,255,0.95);
           backdrop-filter: blur(20px);
           border-bottom: 1px solid var(--border);
           padding: 0 28px;
@@ -463,7 +452,7 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
           display: flex; align-items: center; justify-content: space-between;
         }
 
-        .header-logo img { height: 34px; filter: brightness(0) invert(1); }
+        .header-logo img { height: 34px; }
 
         .header-right {
           display: flex; align-items: center; gap: 20px;
@@ -513,12 +502,11 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         /* ── LIVE BADGE ── */
         .live-badge {
           display: flex; align-items: center; gap: 8px;
-          background: rgba(26,26,26,0.8);
-          border: 1px solid var(--border2);
+          background: var(--panel);
+          border: 1px solid var(--border);
           border-radius: 20px;
           padding: 6px 14px;
           font-size: 11px; color: var(--muted);
-          backdrop-filter: blur(8px);
         }
 
         .live-dot {
@@ -537,37 +525,38 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         /* ── COUNTDOWN ── */
         .countdown-bar {
           display: flex; align-items: center; justify-content: center; gap: 8px;
-          background: linear-gradient(135deg, rgba(212,175,55,0.08), rgba(212,175,55,0.04));
-          border: 1px solid rgba(212,175,55,0.2);
+          background: #f9f6ee;
+          border: 1px solid #e8dfc0;
           border-radius: var(--r);
           padding: 10px 18px;
-          font-size: 12px; color: var(--gold);
+          font-size: 12px; color: #7a6120;
           letter-spacing: .02em;
           margin-bottom: 20px;
         }
 
-        .countdown-bar strong { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+        .countdown-bar strong { font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; color: #5a4510; }
 
         /* ── RECENT PURCHASE NOTIFICATION ── */
         .recent-purchase {
           display: flex; align-items: center; gap: 10px;
-          background: rgba(22,22,22,0.9);
-          border: 1px solid var(--border2);
-          border-left: 3px solid var(--gold);
+          background: var(--white);
+          border: 1px solid var(--border);
+          border-left: 3px solid var(--bright);
           border-radius: var(--r);
           padding: 10px 14px;
           font-size: 11px; color: var(--muted);
           margin-bottom: 16px;
           opacity: 0; transform: translateY(4px);
           transition: opacity .4s ease, transform .4s ease;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         }
 
         .recent-purchase.visible { opacity: 1; transform: translateY(0); }
 
         .rp-avatar {
           width: 28px; height: 28px; border-radius: 50%;
-          background: linear-gradient(135deg, var(--gold2), var(--gold));
-          color: var(--void); font-size: 12px; font-weight: 700;
+          background: var(--bright);
+          color: var(--white); font-size: 12px; font-weight: 700;
           display: flex; align-items: center; justify-content: center;
           flex-shrink: 0;
         }
@@ -580,31 +569,31 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .stock-warning {
           display: flex; align-items: center; gap: 10px;
           padding: 10px 14px;
-          background: rgba(229,62,62,0.06);
-          border: 1px solid rgba(229,62,62,0.2);
+          background: #fff5f5;
+          border: 1px solid #ffd0d0;
           border-radius: var(--r);
-          font-size: 11px; color: #ff8080;
+          font-size: 11px; color: #c0392b;
           margin-top: 8px;
         }
 
         .stock-bar {
           width: 60px; height: 4px;
-          background: rgba(229,62,62,0.15);
+          background: #ffd0d0;
           border-radius: 2px; flex-shrink: 0; overflow: hidden;
         }
 
         .stock-fill {
           height: 100%;
-          background: linear-gradient(90deg, #ff4444, #ff6666);
+          background: #e74c3c;
           border-radius: 2px;
           animation: stock-pulse 2s ease-in-out infinite;
         }
 
         @keyframes stock-pulse {
-          0%, 100% { opacity: 1; } 50% { opacity: .7; }
+          0%, 100% { opacity: 1; } 50% { opacity: .6; }
         }
 
-        .stock-warning strong { color: #ff6666; }
+        .stock-warning strong { color: #c0392b; font-weight: 700; }
 
         /* ── STAR RATING ── */
         .star-rating-block {
@@ -636,6 +625,7 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .form-side {
           padding: 40px 28px 100px;
           border-right: 1px solid var(--border);
+          background: var(--white);
         }
 
         @media (min-width: 1024px) { .form-side { padding: 56px 52px 100px; } }
@@ -702,8 +692,8 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
 
         .section-heading-num {
           width: 24px; height: 24px;
-          background: var(--gold);
-          color: var(--void);
+          background: var(--bright);
+          color: var(--white);
           font-family: var(--sans);
           font-size: 11px; font-weight: 800;
           border-radius: 50%;
@@ -780,7 +770,7 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
           display: flex; justify-content: space-between; align-items: center;
           padding: 16px 18px;
           background: var(--surface);
-          border: 1.5px solid var(--gold);
+          border: 1.5px solid var(--bright);
           border-radius: var(--r);
           position: relative; overflow: hidden;
         }
@@ -788,13 +778,13 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .shipping-option::before {
           content: '';
           position: absolute; inset: 0;
-          background: linear-gradient(135deg, rgba(212,175,55,0.06), transparent 60%);
+          background: linear-gradient(135deg, rgba(0,0,0,0.02), transparent 60%);
           pointer-events: none;
         }
 
         .shipping-check {
           width: 18px; height: 18px; border-radius: 50%;
-          background: var(--gold);
+          background: var(--bright);
           display: flex; align-items: center; justify-content: center;
           flex-shrink: 0; margin-right: 12px;
         }
@@ -820,8 +810,8 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
           display: flex; align-items: flex-start;
           gap: 0; margin-top: 16px;
           padding: 16px;
-          background: rgba(212,175,55,0.04);
-          border: 1px solid rgba(212,175,55,0.1);
+          background: var(--panel);
+          border: 1px solid var(--border);
           border-radius: var(--r);
         }
 
@@ -834,23 +824,23 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
           content: '';
           position: absolute; top: 10px; left: 50%;
           width: 100%; height: 1px;
-          background: linear-gradient(90deg, var(--gold), var(--border));
+          background: linear-gradient(90deg, var(--border2), var(--border));
         }
 
         .timeline-icon {
           width: 20px; height: 20px; border-radius: 50%;
-          background: var(--gold);
+          background: var(--bright);
           display: flex; align-items: center; justify-content: center;
           z-index: 1; flex-shrink: 0;
         }
 
         .timeline-icon.pending {
-          background: var(--surface);
+          background: var(--white);
           border: 1px solid var(--border2);
         }
 
         .timeline-label { font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-        .timeline-label.active { color: var(--gold); }
+        .timeline-label.active { color: var(--bright); }
 
         /* ── TRUST BADGES ── */
         .trust-row {
@@ -861,15 +851,15 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .trust-chip {
           display: flex; flex-direction: column; align-items: center; gap: 5px;
           padding: 12px 8px;
-          background: var(--surface);
+          background: var(--white);
           border: 1px solid var(--border);
           border-radius: var(--r);
           text-align: center;
-          transition: border-color .2s;
+          transition: border-color .2s, box-shadow .2s;
         }
 
-        .trust-chip:hover { border-color: var(--border2); }
-        .trust-chip-icon { color: var(--gold); }
+        .trust-chip:hover { border-color: var(--bright); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .trust-chip-icon { color: var(--bright); }
         .trust-chip-label { font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--bright); }
         .trust-chip-sub { font-size: 9px; color: var(--muted); }
 
@@ -894,21 +884,21 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         /* ── STRIPE WRAPPER ── */
         .stripe-wrapper {
           border: 1px solid var(--border2);
-          background: var(--surface);
+          background: var(--white);
           border-radius: var(--r);
           padding: 20px;
           margin-bottom: 16px;
           transition: border-color .2s;
         }
 
-        .stripe-wrapper:focus-within { border-color: var(--gold); }
+        .stripe-wrapper:focus-within { border-color: var(--bright); }
 
         .stripe-placeholder {
           padding: 24px;
           text-align: center;
           font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
           color: var(--muted);
-          background: var(--surface);
+          background: var(--panel);
           border: 1px dashed var(--border2);
           border-radius: var(--r);
         }
@@ -937,9 +927,8 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         /* ── SUBMIT BUTTON ── */
         .submit-btn {
           width: 100%; height: 60px;
-          background: linear-gradient(135deg, var(--gold2), var(--gold), var(--gold2));
-          background-size: 200% 200%;
-          color: var(--void);
+          background: var(--bright);
+          color: var(--white);
           border: none; border-radius: var(--r);
           font-family: var(--sans);
           font-size: 12px; font-weight: 800;
@@ -955,19 +944,19 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .submit-btn::before {
           content: '';
           position: absolute; inset: 0;
-          background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+          background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.08) 50%, transparent 70%);
           transform: translateX(-100%);
           transition: transform .5s;
         }
 
         .submit-btn:hover:not(:disabled)::before { transform: translateX(100%); }
-        .submit-btn:hover:not(:disabled) { background-position: right center; box-shadow: 0 4px 24px rgba(212,175,55,0.3); transform: translateY(-1px); }
+        .submit-btn:hover:not(:disabled) { background: #222; box-shadow: 0 4px 20px rgba(0,0,0,0.25); transform: translateY(-1px); }
         .submit-btn:active:not(:disabled) { transform: translateY(0); }
-        .submit-btn:disabled { opacity: .35; cursor: not-allowed; }
+        .submit-btn:disabled { opacity: .3; cursor: not-allowed; }
 
         .submit-lock {
           width: 16px; height: 16px;
-          background: rgba(0,0,0,0.15);
+          background: rgba(255,255,255,0.15);
           border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
         }
@@ -1007,21 +996,21 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .guarantee-card {
           display: flex; flex-direction: column; gap: 8px;
           padding: 14px;
-          background: var(--surface);
+          background: var(--white);
           border: 1px solid var(--border);
           border-radius: var(--r);
-          transition: border-color .2s;
+          transition: border-color .2s, box-shadow .2s;
         }
 
-        .guarantee-card:hover { border-color: var(--border2); }
+        .guarantee-card:hover { border-color: var(--border2); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
         .guarantee-card-icon {
           width: 32px; height: 32px;
-          background: rgba(212,175,55,0.08);
-          border: 1px solid rgba(212,175,55,0.15);
+          background: var(--panel);
+          border: 1px solid var(--border);
           border-radius: var(--r);
           display: flex; align-items: center; justify-content: center;
-          color: var(--gold);
+          color: var(--bright);
         }
 
         .guarantee-card-title {
@@ -1095,13 +1084,13 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .discount-banner {
           display: flex; justify-content: space-between; align-items: center;
           padding: 14px 16px; margin-bottom: 20px;
-          background: linear-gradient(135deg, rgba(212,175,55,0.1), rgba(212,175,55,0.05));
-          border: 1px solid rgba(212,175,55,0.25);
+          background: #f5faf7;
+          border: 1px solid #c3e6d4;
           border-radius: var(--r);
         }
 
-        .discount-label { font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); margin-bottom: 3px; opacity: .7; }
-        .discount-amount { font-family: var(--serif); font-size: 20px; color: var(--gold); }
+        .discount-label { font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #1a7a40; margin-bottom: 3px; opacity: .8; }
+        .discount-amount { font-family: var(--serif); font-size: 20px; color: #1a7a40; }
 
         /* ── TOTALS ── */
         .order-totals { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 8px; }
@@ -1124,7 +1113,7 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
         .security-strip {
           display: flex; align-items: center; justify-content: center; gap: 12px;
           padding: 10px 12px; margin-bottom: 16px;
-          background: rgba(22,22,22,0.6);
+          background: var(--panel);
           border: 1px solid var(--border);
           border-radius: var(--r);
           flex-wrap: wrap;
@@ -1503,11 +1492,11 @@ function CheckoutInner({ cart, sessionId }: { cart: CartSessionResponse; session
               className="submit-btn"
             >
               {loading ? (
-                <><div className="spinner" style={{ borderTopColor: 'var(--void)', borderColor: 'rgba(0,0,0,0.2)' }} />Elaborazione pagamento…</>
+                <><div className="spinner" style={{ borderTopColor: 'white', borderColor: 'rgba(255,255,255,0.3)' }} />Elaborazione pagamento…</>
               ) : (
                 <>
                   <div className="submit-lock">
-                    <svg width="9" height="11" fill="var(--void)" viewBox="0 0 9 11">
+                    <svg width="9" height="11" fill="white" viewBox="0 0 9 11">
                       <path d="M7.5 4.5H7V3a2.5 2.5 0 00-5 0v1.5H1.5A1.5 1.5 0 000 6v3.5A1.5 1.5 0 001.5 11h6A1.5 1.5 0 009 9.5V6A1.5 1.5 0 007.5 4.5zM4.5 8a1 1 0 110-2 1 1 0 010 2zM6 4.5H3V3a1.5 1.5 0 013 0v1.5z"/>
                     </svg>
                   </div>
@@ -1635,21 +1624,21 @@ function CheckoutPageContent() {
   }, [sessionId])
 
   if (loading || !stripePromise) return (
-    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ minHeight: '100vh', background: '#f7f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ width: 36, height: 36, border: '2px solid #2a2a2a', borderTopColor: '#d4af37', borderRadius: '50%', animation: 'spin .7s linear infinite', margin: '0 auto 16px' }} />
+        <div style={{ width: 36, height: 36, border: '2px solid #e2e2de', borderTopColor: '#0a0a0a', borderRadius: '50%', animation: 'spin .7s linear infinite', margin: '0 auto 16px' }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <p style={{ fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: '#444' }}>Caricamento…</p>
+        <p style={{ fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: '#aaa' }}>Caricamento…</p>
       </div>
     </div>
   )
 
   if (error || !cart) return (
-    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 24px' }}>
+    <div style={{ minHeight: '100vh', background: '#f7f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 24px' }}>
       <div style={{ maxWidth: 400, textAlign: 'center' }}>
-        <div style={{ width: 52, height: 52, border: '1px solid #d4af37', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: 22, color: '#d4af37' }}>✕</div>
-        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 400, color: '#f0ede6', marginBottom: 12 }}>Impossibile caricare il checkout</h1>
-        <p style={{ fontSize: 13, color: '#666', lineHeight: 1.6 }}>{error}</p>
+        <div style={{ width: 52, height: 52, border: '1px solid #0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: 22, color: '#0a0a0a' }}>✕</div>
+        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: 22, fontWeight: 400, color: '#0a0a0a', marginBottom: 12 }}>Impossibile caricare il checkout</h1>
+        <p style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>{error}</p>
       </div>
     </div>
   )
@@ -1660,26 +1649,26 @@ function CheckoutPageContent() {
     currency: (cart.currency || 'eur').toLowerCase(),
     paymentMethodTypes: ['card'],
     appearance: {
-      theme: "night" as const,
+      theme: "stripe" as const,
       variables: {
-        colorPrimary: "#d4af37",
-        colorBackground: "#161616",
-        colorText: "#d8d8d0",
-        colorDanger: "#e53e3e",
+        colorPrimary: "#0a0a0a",
+        colorBackground: "#ffffff",
+        colorText: "#0a0a0a",
+        colorDanger: "#c8251f",
         fontFamily: '"Outfit", system-ui, sans-serif',
         spacingUnit: '4px',
         borderRadius: "3px",
         fontSizeBase: '14px',
-        colorIcon: '#d4af37',
+        colorIcon: '#0a0a0a',
       },
       rules: {
-        '.Input': { border: '1px solid #2a2a2a', boxShadow: 'none', padding: '13px 16px', backgroundColor: '#161616', color: '#d8d8d0' },
-        '.Input:focus': { border: '1px solid #d4af37', boxShadow: '0 0 0 3px rgba(212,175,55,0.08)' },
-        '.Label': { fontSize: '10px', fontWeight: '600', letterSpacing: '.12em', textTransform: 'uppercase', color: '#666' },
-        '.Tab': { border: '1px solid #2a2a2a', backgroundColor: '#161616', borderRadius: '3px' },
-        '.Tab--selected': { border: '1px solid #d4af37', boxShadow: '0 0 0 3px rgba(212,175,55,0.08)' },
-        '.TabIcon--selected': { fill: '#d4af37' },
-        '.TabLabel--selected': { color: '#d4af37' },
+        '.Input': { border: '1px solid #d0d0cc', boxShadow: 'none', padding: '13px 16px', backgroundColor: '#ffffff', color: '#0a0a0a' },
+        '.Input:focus': { border: '1px solid #0a0a0a', boxShadow: '0 0 0 3px rgba(10,10,10,0.06)' },
+        '.Label': { fontSize: '10px', fontWeight: '600', letterSpacing: '.12em', textTransform: 'uppercase', color: '#888' },
+        '.Tab': { border: '1px solid #e2e2de', backgroundColor: '#ffffff', borderRadius: '3px' },
+        '.Tab--selected': { border: '1px solid #0a0a0a', boxShadow: '0 0 0 3px rgba(10,10,10,0.06)' },
+        '.TabIcon--selected': { fill: '#0a0a0a' },
+        '.TabLabel--selected': { color: '#0a0a0a' },
       }
     },
   }
@@ -1694,8 +1683,8 @@ function CheckoutPageContent() {
 export default function CheckoutPage() {
   return (
     <Suspense fallback={
-      <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 36, height: 36, border: '2px solid #2a2a2a', borderTopColor: '#d4af37', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
+      <div style={{ minHeight: '100vh', background: '#f7f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 36, height: 36, border: '2px solid #e2e2de', borderTopColor: '#0a0a0a', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     }>
@@ -1703,4 +1692,3 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
-
