@@ -136,7 +136,7 @@ function ThankYouContent() {
             const cartAttrs = data.rawCart?.attributes || {}
             
             ;(window as any).gtag('event', 'conversion', {
-              'send_to': 'AW-17925038279/z6Q7CIeWzPkbEMfBqeNC',
+              'send_to': 'AW-17960095093/dvWzCKSd8fsbEPWahfRC',
               'value': orderTotal,
               'currency': data.currency || 'EUR',
               'transaction_id': orderId,
