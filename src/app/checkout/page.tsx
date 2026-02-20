@@ -1883,6 +1883,7 @@ function CheckoutPageContent() {
     amount: 1000,
     currency: (cart.currency || 'eur').toLowerCase(),
     paymentMethodTypes: ['card'],
+  setupFutureUsage: 'off_session',  // ← AGGIUNGI QUESTA
     appearance: {
       theme: "stripe" as const,
       variables: {
