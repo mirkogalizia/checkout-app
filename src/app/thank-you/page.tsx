@@ -230,6 +230,9 @@ function ThankYouContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
+  const [quickAdding, setQuickAdding] = useState(false)
+  const [quickDone, setQuickDone] = useState(false)
+  const [quickError, setQuickError] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -258,6 +261,55 @@ function ThankYouContent() {
   }, [sessionId])
 
   const fmt = (cents:number|undefined) => new Intl.NumberFormat("it-IT",{ style:"currency", currency:orderData?.currency||"EUR", minimumFractionDigits:2 }).format((cents??0)/100)
+
+  const handleQuickUpsell = async () => {
+    if (!sessionId || !orderData) return
+    setQuickAdding(true)
+    setQuickError(null)
+    try {
+      // Prendi taglia/colore dal primo item dell'ordine originale
+      const firstItem = orderData.items?.[0]
+      const variantTitle = firstItem?.variantTitle || ""
+
+      // Fetch prodotti upsell per trovare la t-shirt interstellar con stessa variante
+      const productsRes = await fetch("/api/upsell-products")
+      const productsData = await productsRes.json()
+      const tshirt = productsData.products?.find((p: any) =>
+        p.handle.includes("t-shirt")
+      )
+      if (!tshirt) throw new Error("Prodotto non trovato")
+
+      // Cerca variante che matcha taglia/colore originale, altrimenti prima disponibile
+      const matchingVariant = tshirt.variants.find((v: any) =>
+        v.availableForSale && variantTitle &&
+        v.title.toLowerCase().includes(variantTitle.split(" / ")[0]?.toLowerCase() || "")
+      ) || tshirt.variants.find((v: any) => v.availableForSale)
+
+      if (!matchingVariant) throw new Error("Variante non disponibile")
+
+      const res = await fetch("/api/upsell-charge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          variantId: matchingVariant.id,
+          variantTitle: matchingVariant.title,
+          productTitle: tshirt.title,
+          priceCents: 745,
+          image: tshirt.image,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setQuickError(data.error || "Errore"); return }
+      setQuickDone(true)
+      // Redirect al negozio dopo 1.5s
+      setTimeout(() => { window.location.href = `https://${orderData.shopDomain || "notforresale.it"}` }, 1500)
+    } catch (err: any) {
+      setQuickError(err.message || "Errore di connessione")
+    } finally {
+      setQuickAdding(false)
+    }
+  }
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#000", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
@@ -335,9 +387,14 @@ function ThankYouContent() {
             )}
           </div>
 
+          {/* UPSELL — prima di tutto */}
+          <div className={visible?"ty-fade ty-2":""}>
+            {sessionId && <UpsellBlock sessionId={sessionId} />}
+          </div>
+
           {/* PRODOTTI */}
           {orderData.items && orderData.items.length > 0 && (
-            <div className={visible?"ty-fade ty-2":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div className={visible?"ty-fade ty-3":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, marginTop:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
               <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:18 }}>Il tuo ordine</h2>
               <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
                 {orderData.items.map((item,idx) => (
@@ -377,7 +434,7 @@ function ThankYouContent() {
 
           {/* INDIRIZZO */}
           {customer?.address1 && (
-            <div className={visible?"ty-fade ty-3":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div className={visible?"ty-fade ty-4":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
               <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:14 }}>📦 Spedizione a</h2>
               <div style={{ background:"#f2f2f7", borderRadius:12, padding:"16px 18px", fontSize:14, lineHeight:1.8, color:"#1d1d1f" }}>
                 <strong>{customer.fullName}</strong><br/>
@@ -387,11 +444,6 @@ function ThankYouContent() {
               </div>
             </div>
           )}
-
-          {/* UPSELL */}
-          <div className={visible?"ty-fade ty-4":""}>
-            {sessionId && <UpsellBlock sessionId={sessionId} />}
-          </div>
 
           {/* PROSSIMI PASSI */}
           <div className={visible?"ty-fade ty-4":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginTop:12, marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
@@ -411,12 +463,52 @@ function ThankYouContent() {
             ))}
           </div>
 
-          {/* CTA */}
-          <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:12 }}>
+          {/* CTA PRINCIPALE */}
+          <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:8 }}>
             <a href={`https://${orderData.shopDomain||"notforresale.it"}`} style={{ display:"block", padding:"16px", background:"#000", color:"#fff", textAlign:"center", fontWeight:700, fontSize:15, borderRadius:16, textDecoration:"none", boxSizing:"border-box", boxShadow:"0 4px 16px rgba(0,0,0,0.15)" }}>
               Continua a fare shopping →
             </a>
           </div>
+
+          {/* QUICK PROMO BUTTON */}
+          {!quickDone && (
+            <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:12 }}>
+              {quickError && (
+                <p style={{ textAlign:"center", color:"#c8251f", fontSize:11, marginBottom:6 }}>⚠️ {quickError}</p>
+              )}
+              <button
+                onClick={handleQuickUpsell}
+                disabled={quickAdding}
+                style={{
+                  display:"block", width:"100%", padding:"13px 16px",
+                  background:"transparent",
+                  border:"1px solid rgba(0,0,0,0.12)",
+                  borderRadius:12,
+                  textAlign:"center",
+                  cursor: quickAdding ? "not-allowed" : "pointer",
+                  boxSizing:"border-box",
+                  transition:"all .15s",
+                }}
+              >
+                {quickAdding ? (
+                  <span style={{ fontSize:13, color:"#86868b" }}>Elaborazione...</span>
+                ) : (
+                  <span style={{ fontSize:13, color:"#86868b" }}>
+                    Grazie per la promo 🙏 — aggiungi anche la T-Shirt Interstellar a{" "}
+                    <strong style={{ color:"#000" }}>€7,45</strong>
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+
+          {quickDone && (
+            <div className="ty-fade ty-1" style={{ marginBottom:12, padding:"14px 16px", background:"#f0faf4", border:"1px solid #34c759", borderRadius:12, textAlign:"center" }}>
+              <p style={{ fontSize:13, color:"#1a7a40", fontWeight:600, margin:0 }}>
+                ✓ T-Shirt aggiunta! Redirect al negozio...
+              </p>
+            </div>
+          )}
 
           {/* FOOTER */}
           <div className={visible?"ty-fade ty-5":""} style={{ textAlign:"center", padding:"20px 0 8px" }}>
