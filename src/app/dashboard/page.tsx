@@ -1,1571 +1,857 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-} from "recharts"
+import { useEffect, useState, useCallback } from "react"
 
-// ✅ TYPES AGGIORNATI CON NUOVI CAMPI ADS
+// ─── TIPI ────────────────────────────────────────────────────────────────────
+
+type Purchase = {
+  orderId?: string
+  orderNumber?: string
+  sessionId?: string
+  value: number
+  timestamp: string
+  normalizedSource?: string
+  customer?: { email?: string; fullName?: string; city?: string }
+  utm?: {
+    source?: string
+    medium?: string
+    campaign?: string
+    content?: string
+    term?: string
+    campaign_id?: string
+    adset_id?: string
+    adset_name?: string
+    ad_id?: string
+    ad_name?: string
+    fbclid?: string
+    gclid?: string
+    ttclid?: string
+    first_source?: string
+    first_campaign?: string
+    first_medium?: string
+  }
+  items?: Array<{ title: string; quantity: number; priceCents?: number; linePriceCents?: number }>
+}
+
+type CampaignDetail = {
+  campaign: string
+  source: string
+  medium: string
+  campaignId?: string
+  totalRevenue: number
+  totalOrders: number
+  cpa: number
+  orders: Array<{
+    orderNumber?: string
+    value: number
+    timestamp: string
+    adSet?: string
+    adName?: string
+    fbclid?: string
+    gclid?: string
+    customer?: string
+  }>
+}
+
 type DashboardData = {
   totalPurchases: number
   totalRevenue: number
   avgOrderValue: number
   uniqueCustomers: number
-  byCampaign: Array<{
-    campaign: string
-    source: string
-    medium: string
-    purchases: number
-    revenue: number
-    orders?: Array<{
-      orderNumber: string
-      value: number
-      timestamp: string
-      adSet?: string | null
-      adName?: string | null
-    }>
-  }>
-  bySource: Array<{
-    source: string
-    purchases: number
-    revenue: number
-  }>
-  byAd: Array<{
-    adId: string
-    campaign: string
-    source: string
-    purchases: number
-    revenue: number
-  }>
-  byProduct: Array<{
-    title: string
-    quantity: number
-    revenue: number
-    orders: number
-  }>
-  // ✅ NUOVO: Dettagli campagne con tutti i parametri ads
-  byCampaignDetail: Array<{
-    campaign: string
-    source: string
-    medium: string
-    totalRevenue: number
-    totalOrders: number
-    cpa: number
-    orders: Array<{
-      orderNumber: string
-      orderId: string
-      sessionId: string
-      value: number
-      timestamp: string
-      adSet: string | null
-      adName: string | null
-      campaignId: string | null
-      adsetId: string | null
-      adId: string | null
-      fbclid: string | null
-      gclid: string | null
-      customer: string | null
-      items: Array<any>
-    }>
-  }>
-  recentPurchases: Array<any>
-  dailyRevenue: Array<{
-    date: string
-    revenue: number
-  }>
-  hourlyRevenue: Array<{
-    hour: number
-    revenue: number
-  }>
-  comparison: {
+  byCampaignDetail: CampaignDetail[]
+  bySource: Array<{ source: string; purchases: number; revenue: number }>
+  byProduct: Array<{ title: string; quantity: number; revenue: number; orders: number }>
+  recentPurchases: Purchase[]
+  dailyRevenue: Array<{ date: string; revenue: number }>
+  hourlyRevenue: Array<{ hour: number; revenue: number }>
+  comparison?: {
     purchases: number
     revenue: number
     avgOrderValue: number
-    purchasesDiff: number
-    revenueDiff: number
-    avgOrderDiff: number
     purchasesPercent: number
     revenuePercent: number
   } | null
+  meta: { deduplicatedCount: number; duplicatesRemoved: number }
 }
 
-type Insight = {
-  type: "success" | "warning" | "info" | "danger"
-  title: string
-  message: string
-  action?: string
-  icon: string
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+
+const formatMoney = (v: number) =>
+  new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(v)
+
+const formatDate = (iso: string) => {
+  const d = new Date(iso)
+  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-const COLORS = {
-  facebook: "#1877F2",
-  google: "#EA4335",
-  instagram: "#E4405F",
-  tiktok: "#000000",
-  direct: "#6B7280",
-  email: "#7C3AED",
-  organic: "#10B981",
-  test: "#F59E0B",
+const getDayLabel = (iso: string) => {
+  const d = new Date(iso)
+  return d.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" })
 }
 
-const PIE_COLORS = [
-  "#3B82F6",
-  "#10B981",
-  "#F59E0B",
-  "#EF4444",
-  "#8B5CF6",
-  "#EC4899",
-]
+const sourceEmoji: Record<string, string> = {
+  Meta: "📘", Google: "🔍", TikTok: "🎵", Direct: "👤", Referral: "🔗", Organic: "🌱"
+}
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [darkMode, setDarkMode] = useState(false)
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [showComparison, setShowComparison] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
-  const [notification, setNotification] = useState<string | null>(null)
-  const [insights, setInsights] = useState<Insight[]>([])
+const sourceColor: Record<string, string> = {
+  Meta: "#1877F2", Google: "#EA4335", TikTok: "#000000", Direct: "#6B7280", Referral: "#8B5CF6"
+}
 
-  const [dateRange, setDateRange] = useState({
-    start: "",
-    end: "",
-  })
+// ─── GENERATORE CONSIGLI AI ──────────────────────────────────────────────────
 
-  const [compareRange, setCompareRange] = useState({
-    start: "",
-    end: "",
-  })
+function generateInsights(data: DashboardData): Array<{ type: "success"|"warning"|"danger"|"info"; title: string; message: string; action?: string }> {
+  const insights = []
+  const campaigns = data.byCampaignDetail
 
-  // ✅ CALCOLA KPI AVANZATI
-  const calculateAdvancedKPIs = (data: DashboardData) => {
-    if (!data) return null
-
-    const repeatRate =
-      data.totalPurchases > 0
-        ? ((data.totalPurchases - data.uniqueCustomers) /
-            data.totalPurchases) *
-          100
-        : 0
-
-    const bestCampaign = [...data.byCampaign].sort(
-      (a, b) => b.revenue - a.revenue,
-    )[0]
-    const worstCampaign = [...data.byCampaign].sort(
-      (a, b) => a.revenue - b.revenue,
-    )[0]
-
-    const recentOrders = data.recentPurchases.slice(0, 7)
-    const recentAOV =
-      recentOrders.length > 0
-        ? recentOrders.reduce(
-            (sum, o) => sum + (o.valueCents || o.value * 100 || 0),
-            0,
-          ) /
-          recentOrders.length /
-          100
-        : 0
-
-    const peakHour = [...(data.hourlyRevenue || [])].sort(
-      (a, b) => b.revenue - a.revenue,
-    )[0]
-
-    const growthRate = data.comparison
-      ? ((data.totalRevenue - data.comparison.revenue) /
-          data.comparison.revenue) *
-        100
-      : 0
-
-    return {
-      repeatRate,
-      bestCampaign,
-      worstCampaign,
-      recentAOV,
-      aovTrend: recentAOV > data.avgOrderValue ? "up" : "down",
-      peakHour,
-      growthRate,
-      totalCustomerValue:
-        data.uniqueCustomers > 0
-          ? data.totalRevenue / data.uniqueCustomers
-          : 0,
-    }
-  }
-
-  // ✅ GENERA INSIGHTS AUTOMATICI
-  const generateInsights = (data: DashboardData, kpis: any): Insight[] => {
-    const insights: Insight[] = []
-    if (!data || !kpis) return insights
-
-    if (kpis.repeatRate > 30) {
-      insights.push({
-        type: "success",
-        icon: "🎉",
-        title: "Ottima Retention!",
-        message: `${kpis.repeatRate.toFixed(
-          0,
-        )}% di clienti ripetuti. I tuoi prodotti piacciono!`,
-        action: "Investi in email marketing per fidelizzazione",
-      })
-    } else if (kpis.repeatRate < 15) {
-      insights.push({
-        type: "warning",
-        icon: "⚠️",
-        title: "Bassa Retention",
-        message: `Solo ${kpis.repeatRate.toFixed(
-          0,
-        )}% di clienti ripetuti.`,
-        action:
-          "Implementa programmi fedeltà e follow-up email",
-      })
-    }
-
-    if (kpis.growthRate > 20) {
-      insights.push({
-        type: "success",
-        icon: "📈",
-        title: "Crescita Esplosiva!",
-        message: `Revenue cresciuta del ${kpis.growthRate.toFixed(
-          0,
-        )}% rispetto al periodo precedente.`,
-        action: "Scala il budget sulle campagne vincenti",
-      })
-    } else if (kpis.growthRate < -10) {
-      insights.push({
-        type: "danger",
-        icon: "📉",
-        title: "Revenue in Calo",
-        message: `Revenue calata del ${Math.abs(
-          kpis.growthRate,
-        ).toFixed(0)}%.`,
-        action:
-          "Rivedi targeting e creative delle campagne",
-      })
-    }
-
-    if (
-      kpis.bestCampaign &&
-      kpis.bestCampaign.revenue > data.totalRevenue * 0.3
-    ) {
-      insights.push({
-        type: "info",
-        icon: "🚀",
-        title: "Campagna Star",
-        message: `"${kpis.bestCampaign.campaign}" genera il ${(
-          (kpis.bestCampaign.revenue / data.totalRevenue) *
-          100
-        ).toFixed(0)}% del revenue.`,
-        action:
-          "Duplica questa campagna con budget maggiorato",
-      })
-    }
-
-    if (
-      kpis.worstCampaign &&
-      kpis.worstCampaign.purchases > 0 &&
-      kpis.worstCampaign.revenue < data.totalRevenue * 0.05
-    ) {
-      insights.push({
-        type: "warning",
-        icon: "💡",
-        title: "Campagna Sottoperformante",
-        message: `"${kpis.worstCampaign.campaign}" genera solo ${formatMoney(
-          kpis.worstCampaign.revenue,
-        )}.`,
-        action:
-          "Considera di mettere in pausa o ottimizzare",
-      })
-    }
-
-    if (kpis.aovTrend === "up") {
-      insights.push({
-        type: "success",
-        icon: "💰",
-        title: "AOV in Crescita",
-        message: `Valore medio ordine recente: ${formatMoney(
-          kpis.recentAOV,
-        )} (media: ${formatMoney(data.avgOrderValue)})`,
-        action:
-          "Upselling funziona! Continua con bundle e cross-sell",
-      })
-    }
-
-    if (kpis.peakHour) {
-      insights.push({
-        type: "info",
-        icon: "⏰",
-        title: "Orario di Punta",
-        message: `Massimo revenue alle ${kpis.peakHour.hour}:00 (${formatMoney(
-          kpis.peakHour.revenue,
-        )})`,
-        action:
-          "Programma ads e email in questa fascia oraria",
-      })
-    }
-
-    const dominantSource = data.bySource[0]
-    if (
-      dominantSource &&
-      dominantSource.revenue > data.totalRevenue * 0.7
-    ) {
-      insights.push({
-        type: "warning",
-        icon: "🎯",
-        title: "Troppa Dipendenza",
-        message: `${dominantSource.source} rappresenta il ${(
-          (dominantSource.revenue / data.totalRevenue) *
-          100
-        ).toFixed(0)}% del revenue.`,
-        action:
-          "Diversifica su altre fonti di traffico per ridurre rischio",
-      })
-    }
-
-    return insights
-  }
-
-  const getDateRange = (days: number) => {
-    const end = new Date()
-    end.setHours(23, 59, 59, 999)
-
-    const start = new Date()
-    start.setDate(start.getDate() - days + 1)
-    start.setHours(0, 0, 0, 0)
-
-    return {
-      start: start.toISOString().split("T")[0],
-      end: end.toISOString().split("T")[0],
-    }
-  }
-
-  const applyQuickFilter = (
-    type: "today" | "yesterday" | "7days" | "14days" | "30days" | "all",
-  ) => {
-    const today = new Date()
-    today.setHours(23, 59, 59, 999)
-
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-
-    let range = { start: "", end: "" }
-
-    switch (type) {
-      case "today":
-        range = {
-          start: today.toISOString().split("T")[0],
-          end: today.toISOString().split("T")[0],
-        }
-        showNotification("📅 Filtro: Oggi")
-        break
-
-      case "yesterday":
-        range = {
-          start: yesterday.toISOString().split("T")[0],
-          end: yesterday.toISOString().split("T")[0],
-        }
-        showNotification("📅 Filtro: Ieri")
-        break
-
-      case "7days":
-        range = getDateRange(7)
-        showNotification("📅 Filtro: Ultimi 7 giorni")
-        break
-
-      case "14days":
-        range = getDateRange(14)
-        showNotification("📅 Filtro: Ultimi 14 giorni")
-        break
-
-      case "30days":
-        range = getDateRange(30)
-        showNotification("📅 Filtro: Ultimi 30 giorni")
-        break
-
-      case "all":
-        range = { start: "", end: "" }
-        showNotification("📅 Filtro: Tutto il periodo")
-        break
-    }
-
-    setDateRange(range)
-    setTimeout(() => loadDataWithRange(range), 100)
-  }
-
-  const loadDataWithRange = async (
-    customRange?: { start: string; end: string },
-  ) => {
-    try {
-      const range = customRange || dateRange
-
-      let url = "/api/analytics/dashboard?limit=1000"
-
-      if (range.start) url += `&startDate=${range.start}`
-      if (range.end) url += `&endDate=${range.end}`
-
-      if (showComparison && compareRange.start && compareRange.end) {
-        url += `&compareStartDate=${compareRange.start}&compareEndDate=${compareRange.end}`
-      }
-
-      const res = await fetch(url)
-      const json = await res.json()
-
-      if (data && json.totalPurchases > data.totalPurchases) {
-        const diff = json.totalPurchases - data.totalPurchases
-        showNotification(
-          `🎉 ${diff} ${
-            diff === 1 ? "nuovo ordine" : "nuovi ordini"
-          }!`,
-        )
-      }
-
-      setData(json)
-
-      // ✅ Genera insights
-      const kpis = calculateAdvancedKPIs(json)
-      if (kpis) {
-        const newInsights = generateInsights(json, kpis)
-        setInsights(newInsights)
-      }
-
-      setLastUpdate(new Date())
-    } catch (err) {
-      console.error("❌ Errore caricamento dashboard:", err)
-      showNotification("❌ Errore caricamento dati")
-    }
-    setLoading(false)
-  }
-
-  const loadData = async () => {
-    await loadDataWithRange()
-  }
-
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  useEffect(() => {
-    if (!autoRefresh) return
-
-    const interval = setInterval(() => {
-      loadData()
-    }, 30000)
-
-    return () => clearInterval(interval)
-  }, [autoRefresh, dateRange, compareRange, showComparison, data])
-
-  const showNotification = (message: string) => {
-    setNotification(message)
-    setTimeout(() => setNotification(null), 4000)
-  }
-
-  // ✅ EXPORT CSV AGGIORNATO CON NUOVI CAMPI ADS
-  const exportCSV = () => {
-    if (!data) return
-
-    const rows = [
-      [
-        "Ordine",
-        "Data",
-        "Valore",
-        "Campagna",
-        "Sorgente",
-        "Campaign ID",
-        "Ad Set ID",
-        "Ad Set Name",
-        "Ad ID",
-        "Ad Name",
-        "fbclid",
-        "gclid",
-        "Email",
-        "Prodotti",
-      ],
-      ...data.recentPurchases.map((p: any) => [
-        p.shopifyOrderNumber || p.orderNumber || "",
-        p.timestamp || "",
-        (p.valueCents || p.value * 100 || 0) / 100,
-        p.utm?.campaign || "direct",
-        p.utm?.source || "direct",
-        p.utm?.campaign_id || "",
-        p.utm?.adset_id || "",
-        p.utm?.adset_name || "",
-        p.utm?.ad_id || "",
-        p.utm?.ad_name || "",
-        p.utm?.fbclid || "",
-        p.utm?.gclid || "",
-        p.customer?.email || "",
-        p.items
-          ?.map((i: any) => `${i.title} x${i.quantity}`)
-          .join("; ") || "",
-      ]),
-    ]
-
-    const csv = rows
-      .map(row => row.map(cell => `"${cell}"`).join(","))
-      .join("\n")
-    const blob = new Blob([csv], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `analytics_${new Date()
-      .toISOString()
-      .split("T")[0]}.csv`
-    a.click()
-
-    showNotification("📥 CSV scaricato!")
-  }
-
-  const formatMoney = (value: number) => {
-    return new Intl.NumberFormat("it-IT", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-    }).format(value)
-  }
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("it-IT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+  // Top performer
+  const top = campaigns[0]
+  if (top) {
+    insights.push({
+      type: "success" as const,
+      title: `🏆 Campagna TOP`,
+      message: `"${top.campaign}" da ${top.source} genera ${formatMoney(top.totalRevenue)} con ${top.totalOrders} ordini (AOV: ${formatMoney(top.cpa)})`,
+      action: `Aumenta il budget su questa campagna`
     })
   }
 
-  const formatShortDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("it-IT", {
-      day: "2-digit",
-      month: "short",
+  // Campagna con ordini ma AOV basso
+  const lowAov = campaigns.find(c => c.totalOrders >= 3 && c.cpa < data.avgOrderValue * 0.7)
+  if (lowAov) {
+    insights.push({
+      type: "warning" as const,
+      title: `⚠️ AOV Basso rilevato`,
+      message: `"${lowAov.campaign}" ha un ordine medio di ${formatMoney(lowAov.cpa)} vs media ${formatMoney(data.avgOrderValue)}`,
+      action: `Controlla le creatività — potrebbe attirare clienti sbagliati`
     })
   }
 
-  const getSourceBadgeColor = (source: string) => {
-    return (
-      COLORS[source.toLowerCase() as keyof typeof COLORS] ||
-      COLORS.direct
-    )
+  // Campagna con 1 solo ordine
+  const singleOrder = campaigns.filter(c => c.totalOrders === 1)
+  if (singleOrder.length > 0) {
+    insights.push({
+      type: "info" as const,
+      title: `👀 ${singleOrder.length} campagne con 1 solo ordine`,
+      message: `Potrebbero essere test o campagne in fase di apprendimento`,
+      action: `Aspetta almeno 5 conversioni prima di ottimizzare o spegnere`
+    })
   }
 
-  const renderTrend = (current: number, previous: number) => {
-    if (previous === 0) return null
-    const percent = ((current - previous) / previous) * 100
-    const isPositive = percent >= 0
-
-    return (
-      <span
-        className={`text-sm font-medium ${
-          isPositive ? "text-green-600" : "text-red-600"
-        }`}
-      >
-        {isPositive ? "↑" : "↓"} {Math.abs(percent).toFixed(1)}%
-      </span>
-    )
+  // Multi-touch: first click diverso da last click
+  const multiTouch = data.recentPurchases.filter(p =>
+    p.utm?.first_source && p.utm?.source &&
+    p.utm.first_source !== p.utm.source
+  )
+  if (multiTouch.length > 0) {
+    insights.push({
+      type: "info" as const,
+      title: `🔄 ${multiTouch.length} acquisti multi-touch rilevati`,
+      message: `Questi clienti hanno avuto contatti da canali diversi prima di comprare`,
+      action: `Valuta un modello di attribuzione lineare invece di last-click`
+    })
   }
 
-  const getInsightColor = (type: string) => {
-    switch (type) {
-      case "success":
-        return "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-800 dark:text-green-300"
-      case "warning":
-        return "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300"
-      case "danger":
-        return "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300"
-      default:
-        return "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300"
-    }
+  // Ora migliore
+  const bestHour = data.hourlyRevenue.reduce((a, b) => b.revenue > a.revenue ? b : a, { hour: 0, revenue: 0 })
+  if (bestHour.revenue > 0) {
+    insights.push({
+      type: "info" as const,
+      title: `⏰ Ora di picco: ${bestHour.hour}:00`,
+      message: `La fascia oraria con più revenue è ${bestHour.hour}:00-${bestHour.hour + 1}:00`,
+      action: `Concentra i budget ads e le pubblicazioni in questa fascia`
+    })
   }
 
-  // ✅ FUNZIONE PER DECIDERE AZIONE SU CAMPAGNA (Verde/Giallo/Rosso)
-  const getCampaignActionBadge = (campaign: {
-    purchases: number
-    revenue: number
-  }) => {
-    const avgRevPerOrder =
-      campaign.purchases > 0 ? campaign.revenue / campaign.purchases : 0
-
-    // Logica: se AOV è alto e ordini > 3 → verde (scala)
-    // Se ordini bassi (1-2) → giallo (monitora)
-    // Se revenue molto basso → rosso (spegni)
-    if (campaign.purchases >= 5 && avgRevPerOrder > 30) {
-      return {
-        color: "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700",
-        text: "🚀 SCALA",
-        action: "Aumenta budget +30%",
-      }
-    } else if (campaign.purchases >= 2 && campaign.revenue > 50) {
-      return {
-        color: "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-700",
-        text: "👀 MONITORA",
-        action: "Aspetta più dati",
-      }
-    } else {
-      return {
-        color: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-300 dark:border-red-700",
-        text: "⛔ SPEGNI",
-        action: "Metti in pausa o cambia creative",
-      }
-    }
+  // Direct alto = brand awareness funziona
+  const directSource = data.bySource.find(s => s.source === "Direct")
+  const totalOrders = data.totalPurchases
+  if (directSource && directSource.purchases / totalOrders > 0.3) {
+    insights.push({
+      type: "success" as const,
+      title: `💪 Brand Awareness forte`,
+      message: `${((directSource.purchases / totalOrders) * 100).toFixed(0)}% degli ordini arriva da traffico diretto`,
+      action: `Il brand è riconosciuto — continua a investire in contenuti organici`
+    })
   }
 
-  if (loading) {
-    return (
-      <div
-        className={`min-h-screen ${
-          darkMode ? "bg-gray-900" : "bg-gray-50"
-        } flex items-center justify-center`}
-      >
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p
-            className={
-              darkMode ? "text-gray-300" : "text-gray-600"
-            }
-          >
-            Caricamento analytics...
-          </p>
-        </div>
-      </div>
-    )
+  return insights
+}
+
+// ─── FUNZIONE PERCORSO ───────────────────────────────────────────────────────
+
+function getJourneySteps(purchase: Purchase) {
+  const first = {
+    source: purchase.utm?.first_source || purchase.utm?.source || "direct",
+    campaign: purchase.utm?.first_campaign || purchase.utm?.campaign || "",
+    medium: purchase.utm?.first_medium || purchase.utm?.medium || "",
+  }
+  const last = {
+    source: purchase.utm?.source || "direct",
+    campaign: purchase.utm?.campaign || "",
+    medium: purchase.utm?.medium || "",
+    adset: purchase.utm?.adset_name || "",
+    ad: purchase.utm?.ad_name || "",
   }
 
-  if (!data) {
-    return (
-      <div
-        className={`min-h-screen ${
-          darkMode ? "bg-gray-900" : "bg-gray-50"
-        } flex items-center justify-center`}
-      >
-        <div className="text-center">
-          <p
-            className={
-              darkMode ? "text-gray-300" : "text-gray-600"
-            }
-          >
-            Errore caricamento dati
-          </p>
-        </div>
-      </div>
-    )
+  const isMultiTouch = first.source !== last.source || first.campaign !== last.campaign
+  return { first, last, isMultiTouch }
+}
+
+// ─── BADGE DECISIONE ─────────────────────────────────────────────────────────
+
+function getDecisionBadge(campaign: CampaignDetail, avgOrderValue: number) {
+  if (campaign.totalOrders >= 5 && campaign.cpa >= avgOrderValue) {
+    return { text: "✅ SCALA", color: "bg-green-100 text-green-800", action: "Aumenta budget +20%" }
   }
+  if (campaign.totalOrders >= 3 && campaign.cpa >= avgOrderValue * 0.8) {
+    return { text: "📈 OTTIMIZZA", color: "bg-blue-100 text-blue-800", action: "Testa nuove creatività" }
+  }
+  if (campaign.totalOrders === 1) {
+    return { text: "👀 OSSERVA", color: "bg-yellow-100 text-yellow-800", action: "Aspetta più dati" }
+  }
+  if (campaign.totalOrders >= 2 && campaign.cpa < avgOrderValue * 0.6) {
+    return { text: "⚠️ ANALIZZA", color: "bg-orange-100 text-orange-800", action: "Controlla targeting" }
+  }
+  return { text: "🔄 IN CORSO", color: "bg-gray-100 text-gray-700", action: "Monitora" }
+}
 
-  const kpis = calculateAdvancedKPIs(data)
+// ─── COMPONENTI UI ───────────────────────────────────────────────────────────
 
+function KPICard({ label, value, sub, trend }: { label: string; value: string; sub?: string; trend?: number }) {
   return (
-    <div
-      className={`min-h-screen ${
-        darkMode
-          ? "bg-gray-900 text-white"
-          : "bg-gray-50 text-gray-900"
-      }`}
-    >
-      {/* Notification */}
-      {notification && (
-        <div className="fixed top-4 right-4 z-50 animate-slide-in-right">
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
-            <span>{notification}</span>
-            <button
-              onClick={() => setNotification(null)}
-              className="text-white hover:text-gray-200 font-bold"
-            >
-              ✕
-            </button>
-          </div>
+    <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-2xl font-bold text-gray-900">{value}</div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
+      {trend !== undefined && (
+        <div className={`text-xs font-semibold mt-1 ${trend >= 0 ? "text-green-600" : "text-red-500"}`}>
+          {trend >= 0 ? "▲" : "▼"} {Math.abs(trend)}% vs periodo prec.
         </div>
       )}
+    </div>
+  )
+}
 
-      {/* Header */}
-      <div
-        className={`${
-          darkMode
-            ? "bg-gray-800 border-gray-700"
-            : "bg-white border-gray-200"
-        } border-b sticky top-0 z-40 backdrop-blur-sm bg-opacity-90`}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                📊 Dashboard Campagne Catalogo
-              </h1>
-              <p
-                className={`text-xs sm:text-sm mt-1 ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
-                Not For Resale •{" "}
-                {lastUpdate.toLocaleTimeString("it-IT")}
-              </p>
+function BarChart({ data, valueKey, labelKey, color = "#6366F1" }: {
+  data: any[]; valueKey: string; labelKey: string; color?: string
+}) {
+  const max = Math.max(...data.map(d => d[valueKey]), 1)
+  return (
+    <div className="space-y-2">
+      {data.map((item, i) => (
+        <div key={i} className="flex items-center gap-3 text-sm">
+          <div className="w-24 text-right text-gray-500 truncate text-xs">{item[labelKey]}</div>
+          <div className="flex-1 bg-gray-100 rounded-full h-5 relative">
+            <div
+              className="h-5 rounded-full transition-all duration-700"
+              style={{ width: `${(item[valueKey] / max) * 100}%`, backgroundColor: color }}
+            />
+            <span className="absolute right-2 top-0 bottom-0 flex items-center text-xs font-semibold text-gray-700">
+              {typeof item[valueKey] === "number" && item[valueKey] > 100
+                ? formatMoney(item[valueKey])
+                : item[valueKey]}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─── COMPONENTE PRINCIPALE ───────────────────────────────────────────────────
+
+export default function AnalyticsDashboard() {
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdate, setLastUpdate] = useState(new Date())
+  const [activeTab, setActiveTab] = useState<"overview"|"campaigns"|"journey"|"products">("overview")
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null)
+
+  // Filtri date
+  const today = new Date()
+  const [startDate, setStartDate] = useState(
+    new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0]
+  )
+  const [endDate, setEndDate] = useState(today.toISOString().split("T")[0])
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Periodo precedente per confronto
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+      const prevStart = new Date(start.getTime() - diffDays * 24 * 60 * 60 * 1000)
+      const prevEnd = new Date(start.getTime() - 24 * 60 * 60 * 1000)
+
+      const url = `/api/analytics/dashboard?startDate=${startDate}&endDate=${endDate}&compareStartDate=${prevStart.toISOString().split("T")[0]}&compareEndDate=${prevEnd.toISOString().split("T")[0]}&limit=1000`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Errore caricamento dati")
+      const json = await res.json()
+      setData(json)
+      setLastUpdate(new Date())
+    } catch (err: any) {
+      setError(err.message || "Errore sconosciuto")
+    } finally {
+      setLoading(false)
+    }
+  }, [startDate, endDate])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // Auto-refresh ogni 60 secondi
+  useEffect(() => {
+    const interval = setInterval(fetchData, 60000)
+    return () => clearInterval(interval)
+  }, [fetchData])
+
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <div className="text-gray-500 text-sm">Caricamento analytics...</div>
+      </div>
+    </div>
+  )
+
+  if (error) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="bg-red-50 text-red-700 p-6 rounded-2xl max-w-md text-center">
+        <div className="text-2xl mb-2">❌</div>
+        <div className="font-semibold">{error}</div>
+        <button onClick={fetchData} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Riprova</button>
+      </div>
+    </div>
+  )
+
+  if (!data) return null
+
+  const insights = generateInsights(data)
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans">
+
+      {/* HEADER */}
+      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">📊 Not For Resale — Analytics</h1>
+            <div className="text-xs text-gray-400 mt-0.5">
+              Aggiornato alle {lastUpdate.toLocaleTimeString("it-IT")} •{" "}
+              {data.meta.deduplicatedCount} ordini unici
+              {data.meta.duplicatesRemoved > 0 && ` • ${data.meta.duplicatesRemoved} duplicati rimossi`}
             </div>
-            <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+          </div>
+
+          {/* Filtri data */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="date" value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700"
+            />
+            <span className="text-gray-400 text-sm">→</span>
+            <input
+              type="date" value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700"
+            />
+            <button
+              onClick={fetchData}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition"
+            >
+              Aggiorna
+            </button>
+            {/* Quick filters */}
+            {[
+              { label: "Oggi", days: 0 },
+              { label: "7gg", days: 7 },
+              { label: "30gg", days: 30 },
+            ].map(({ label, days }) => (
               <button
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition ${
-                  autoRefresh
-                    ? "bg-green-600 text-white"
-                    : darkMode
-                    ? "bg-gray-700 text-gray-300"
-                    : "bg-gray-200 text-gray-700"
-                }`}
+                key={label}
+                onClick={() => {
+                  const end = new Date()
+                  const start = new Date()
+                  start.setDate(start.getDate() - days)
+                  setStartDate(start.toISOString().split("T")[0])
+                  setEndDate(end.toISOString().split("T")[0])
+                }}
+                className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs rounded-lg hover:bg-gray-200 transition"
               >
-                {autoRefresh ? "⚡" : "⏸️"}
-                <span className="hidden sm:inline ml-1">
-                  {autoRefresh ? "Auto" : "Pausa"}
-                </span>
+                {label}
               </button>
-              <button
-                onClick={exportCSV}
-                className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition ${
-                  darkMode
-                    ? "bg-gray-700 text-white hover:bg-gray-600"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                📥 <span className="hidden sm:inline">CSV</span>
-              </button>
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition ${
-                  darkMode
-                    ? "bg-gray-700 text-white hover:bg-gray-600"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                {darkMode ? "☀️" : "🌙"}
-              </button>
-              <a
-                href="https://notforresale.it"
-                className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-xs sm:text-sm font-medium"
-              >
-                Vai al sito
-              </a>
-            </div>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
-        {/* ✅ FILTRI E CONFRONTO */}
-        <div
-          className={`${
-            darkMode
-              ? "bg-gray-800 border-gray-700"
-              : "bg-white border-gray-200"
-          } rounded-lg shadow-sm border p-4 sm:p-6 mb-6`}
-        >
-          <h2 className="text-lg font-semibold mb-4">
-            🔍 Filtri e Confronto
-          </h2>
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
 
-          {/* Filtri Rapidi */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">
-              Filtri Rapidi
-            </label>
-            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-              {[
-                { type: "today", label: "Oggi", icon: "📅" },
-                { type: "yesterday", label: "Ieri", icon: "📅" },
-                { type: "7days", label: "7gg", icon: "📊" },
-                { type: "14days", label: "14gg", icon: "📊" },
-                { type: "30days", label: "30gg", icon: "📊" },
-                { type: "all", label: "Tutto", icon: "∞" },
-              ].map(filter => (
-                <button
-                  key={filter.type}
-                  onClick={() =>
-                    applyQuickFilter(filter.type as any)
-                  }
-                  className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition ${
-                    darkMode
-                      ? "bg-gray-700 text-white hover:bg-gray-600"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  <span className="hidden sm:inline">
-                    {filter.icon}{" "}
-                  </span>
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Periodo Personalizzato */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Periodo Principale
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="date"
-                  value={dateRange.start}
-                  onChange={e =>
-                    setDateRange({
-                      ...dateRange,
-                      start: e.target.value,
-                    })
-                  }
-                  className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode
-                      ? "bg-gray-700 border-gray-600 text-white"
-                      : "bg-white border-gray-300 text-gray-900"
-                  }`}
-                />
-                <input
-                  type="date"
-                  value={dateRange.end}
-                  onChange={e =>
-                    setDateRange({
-                      ...dateRange,
-                      end: e.target.value,
-                    })
-                  }
-                  className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode
-                      ? "bg-gray-700 border-gray-600 text-white"
-                      : "bg-white border-gray-300 text-gray-900"
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium">
-                  Periodo di Confronto
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={showComparison}
-                    onChange={e =>
-                      setShowComparison(e.target.checked)
-                    }
-                    className="rounded"
-                  />
-                  Abilita
-                </label>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="date"
-                  value={compareRange.start}
-                  onChange={e =>
-                    setCompareRange({
-                      ...compareRange,
-                      start: e.target.value,
-                    })
-                  }
-                  disabled={!showComparison}
-                  className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode
-                      ? "bg-gray-700 border-gray-600 text-white disabled:opacity-50"
-                      : "bg-white border-gray-300 text-gray-900 disabled:opacity-50"
-                  }`}
-                />
-                <input
-                  type="date"
-                  value={compareRange.end}
-                  onChange={e =>
-                    setCompareRange({
-                      ...compareRange,
-                      end: e.target.value,
-                    })
-                  }
-                  disabled={!showComparison}
-                  className={`flex-1 px-3 py-2 border rounded-md text-sm ${
-                    darkMode
-                      ? "bg-gray-700 border-gray-600 text-white disabled:opacity-50"
-                      : "bg-white border-gray-300 text-gray-900 disabled:opacity-50"
-                  }`}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => loadData()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium"
-            >
-              Applica Filtri
-            </button>
-            <button
-              onClick={() => {
-                setDateRange({ start: "", end: "" })
-                setCompareRange({ start: "", end: "" })
-                setShowComparison(false)
-                setTimeout(() => loadData(), 100)
-              }}
-              className={`px-4 py-2 rounded-md transition text-sm font-medium ${
-                darkMode
-                  ? "bg-gray-700 text-white hover:bg-gray-600"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              Reset
-            </button>
-          </div>
-
-          {(dateRange.start || dateRange.end) && (
-            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <p className="text-xs sm:text-sm text-blue-800 dark:text-blue-300">
-                📅 Periodo: {dateRange.start || "∞"} →{" "}
-                {dateRange.end || "oggi"}
-              </p>
-            </div>
-          )}
+        {/* KPI CARDS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KPICard
+            label="Ordini Totali"
+            value={String(data.totalPurchases)}
+            sub={`${data.uniqueCustomers} clienti unici`}
+            trend={data.comparison?.purchasesPercent}
+          />
+          <KPICard
+            label="Revenue"
+            value={formatMoney(data.totalRevenue)}
+            sub={`${data.byCampaignDetail.length} campagne attive`}
+            trend={data.comparison?.revenuePercent}
+          />
+          <KPICard
+            label="AOV Medio"
+            value={formatMoney(data.avgOrderValue)}
+            sub="Ordine medio"
+          />
+          <KPICard
+            label="Campagna Top"
+            value={data.byCampaignDetail[0]?.source || "—"}
+            sub={data.byCampaignDetail[0]?.campaign?.slice(0, 20) || "Nessuna campagna"}
+          />
         </div>
 
-        {/* ✅ INSIGHTS INTELLIGENTI */}
+        {/* INSIGHTS / CONSIGLI */}
         {insights.length > 0 && (
-          <div className="mb-6 sm:mb-8">
-            <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">
-              💡 Insights e Suggerimenti
-            </h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
-              {insights.map((insight, idx) => (
-                <div
-                  key={idx}
-                  className={`${getInsightColor(
-                    insight.type,
-                  )} border rounded-lg p-4 animate-fade-in`}
-                  style={{ animationDelay: `${idx * 100}ms` }}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl flex-shrink-0">
-                      {insight.icon}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-sm sm:text-base mb-1">
-                        {insight.title}
-                      </h3>
-                      <p className="text-xs sm:text-sm mb-2 opacity-90">
-                        {insight.message}
-                      </p>
-                      {insight.action && (
-                        <p className="text-xs font-medium mt-2 pt-2 border-t border-current border-opacity-20">
-                          💡 {insight.action}
-                        </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {insights.map((insight, i) => (
+              <div
+                key={i}
+                className={`rounded-2xl p-4 border ${
+                  insight.type === "success" ? "bg-green-50 border-green-100" :
+                  insight.type === "warning" ? "bg-yellow-50 border-yellow-100" :
+                  insight.type === "danger"  ? "bg-red-50 border-red-100" :
+                  "bg-blue-50 border-blue-100"
+                }`}
+              >
+                <div className="font-semibold text-sm text-gray-800">{insight.title}</div>
+                <div className="text-xs text-gray-600 mt-1">{insight.message}</div>
+                {insight.action && (
+                  <div className="text-xs font-medium text-indigo-600 mt-2">💡 {insight.action}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* TABS */}
+        <div className="flex gap-2 border-b border-gray-200">
+          {[
+            { id: "overview",   label: "📊 Overview" },
+            { id: "campaigns",  label: "🎯 Campagne" },
+            { id: "journey",    label: "🗺️ Percorso Acquisto" },
+            { id: "products",   label: "📦 Prodotti" },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition -mb-px ${
+                activeTab === tab.id
+                  ? "border-indigo-600 text-indigo-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* TAB: OVERVIEW */}
+        {activeTab === "overview" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {/* Revenue per fonte */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <h3 className="font-semibold text-gray-800 mb-4">Revenue per Fonte</h3>
+              <div className="space-y-3">
+                {data.bySource.map((s, i) => {
+                  const pct = (s.revenue / data.totalRevenue) * 100
+                  return (
+                    <div key={i}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium text-gray-700">
+                          {sourceEmoji[s.source] || "📌"} {s.source}
+                        </span>
+                        <span className="text-gray-500">{formatMoney(s.revenue)} ({pct.toFixed(0)}%)</span>
+                      </div>
+                      <div className="w-full bg-gray-100 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-700"
+                          style={{ width: `${pct}%`, backgroundColor: sourceColor[s.source] || "#6366F1" }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">{s.purchases} ordini</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Revenue giornaliera */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <h3 className="font-semibold text-gray-800 mb-4">Revenue Giornaliera</h3>
+              {data.dailyRevenue.length > 0 ? (
+                <BarChart
+                  data={data.dailyRevenue.slice(-14)}
+                  valueKey="revenue"
+                  labelKey="date"
+                  color="#6366F1"
+                />
+              ) : (
+                <div className="text-gray-400 text-sm text-center py-8">Nessun dato disponibile</div>
+              )}
+            </div>
+
+            {/* Revenue per ora */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <h3 className="font-semibold text-gray-800 mb-4">Distribuzione Oraria</h3>
+              <div className="flex items-end gap-1 h-24">
+                {data.hourlyRevenue.map((h) => {
+                  const max = Math.max(...data.hourlyRevenue.map(x => x.revenue), 1)
+                  const height = (h.revenue / max) * 100
+                  return (
+                    <div key={h.hour} className="flex-1 flex flex-col items-center gap-1" title={`${h.hour}:00 — ${formatMoney(h.revenue)}`}>
+                      <div
+                        className="w-full rounded-t bg-indigo-400 hover:bg-indigo-600 transition"
+                        style={{ height: `${height}%`, minHeight: h.revenue > 0 ? "4px" : "0" }}
+                      />
+                      {h.hour % 6 === 0 && (
+                        <div className="text-xs text-gray-400">{h.hour}h</div>
                       )}
                     </div>
-                  </div>
-                </div>
-              ))}
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Prodotti top */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <h3 className="font-semibold text-gray-800 mb-4">Top Prodotti</h3>
+              <BarChart
+                data={data.byProduct.slice(0, 8)}
+                valueKey="revenue"
+                labelKey="title"
+                color="#10B981"
+              />
             </div>
           </div>
         )}
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          <div
-            className={`${
-              darkMode
-                ? "bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700"
-                : "bg-gradient-to-br from-white to-gray-50 border-gray-200"
-            } p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p
-                  className={`text-xs sm:text-sm font-medium ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  Ordini Totali
-                </p>
-                <p className="text-2xl sm:text-3xl font-bold mt-2">
-                  {data.totalPurchases}
-                </p>
-                <div className="mt-2">
-                  {data.comparison &&
-                    renderTrend(
-                      data.totalPurchases,
-                      data.comparison.purchases,
-                    )}
-                </div>
-              </div>
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg
-                  className="w-6 h-6 sm:w-7 sm:h-7 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-                  />
-                </svg>
-              </div>
+        {/* TAB: CAMPAGNE */}
+        {activeTab === "campaigns" && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800">Performance Campagne — Decisioni Immediate</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Ogni riga mostra il percorso fonte → campagna → ad set → creatività con consiglio operativo</p>
             </div>
-          </div>
-
-          <div
-            className={`${
-              darkMode
-                ? "bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700"
-                : "bg-gradient-to-br from-white to-gray-50 border-gray-200"
-            } p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p
-                  className={`text-xs sm:text-sm font-medium ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  Revenue
-                </p>
-                <p className="text-xl sm:text-2xl font-bold text-green-600 mt-2">
-                  {formatMoney(data.totalRevenue)}
-                </p>
-                <div className="mt-2">
-                  {data.comparison &&
-                    renderTrend(
-                      data.totalRevenue,
-                      data.comparison.revenue,
-                    )}
-                </div>
-              </div>
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg
-                  className="w-6 h-6 sm:w-7 sm:h-7 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`${
-              darkMode
-                ? "bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700"
-                : "bg-gradient-to-br from-white to-gray-50 border-gray-200"
-            } p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p
-                  className={`text-xs sm:text-sm font-medium ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  AOV
-                </p>
-                <p className="text-2xl sm:text-3xl font-bold mt-2">
-                  {formatMoney(data.avgOrderValue)}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  {data.comparison &&
-                    renderTrend(
-                      data.avgOrderValue,
-                      data.comparison.avgOrderValue,
-                    )}
-                </div>
-              </div>
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg
-                  className="w-6 h-6 sm:w-7 sm:h-7 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                  />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`${
-              darkMode
-                ? "bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700"
-                : "bg-gradient-to-br from-white to-gray-50 border-gray-200"
-            } p-4 sm:p-6 rounded-xl shadow-lg border hover:shadow-xl transition-shadow`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p
-                  className={`text-xs sm:text-sm font-medium ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  Repeat Rate
-                </p>
-                <p className="text-2xl sm:text-3xl font-bold mt-2">
-                  {kpis ? kpis.repeatRate.toFixed(0) : 0}%
-                </p>
-                <p
-                  className={`text-xs mt-2 ${
-                    darkMode ? "text-gray-500" : "text-gray-500"
-                  }`}
-                >
-                  {data.uniqueCustomers} clienti unici
-                </p>
-              </div>
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center shadow-lg">
-                <svg
-                  className="w-6 h-6 sm:w-7 sm:h-7 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-                  />
-                </svg>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 🎯 DECISIONI CAMPAGNE CATALOGO (DESIGN CHE TI PIACE) */}
-        <div
-          className={`${
-            darkMode
-              ? "bg-gray-800 border-gray-700"
-              : "bg-white border-gray-200"
-          } rounded-lg shadow-lg border mb-6 sm:mb-8 overflow-hidden`}
-        >
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20">
-            <h2 className="text-lg sm:text-xl font-bold flex items-center gap-2">
-              <span>🎯</span>
-              <span>Decisioni Campagne Catalogo</span>
-            </h2>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-              Performance dettagliata per campagna, ad set e creatività con
-              decisioni immediate
-            </p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <thead
-                className={
-                  darkMode ? "bg-gray-700" : "bg-gray-50"
-                }
-              >
-                <tr>
-                  <th className="w-24 px-3 py-3 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Fonte
-                  </th>
-                  <th className="w-48 px-4 py-3 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Campagna
-                  </th>
-                  <th className="w-56 px-4 py-3 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Ad Set
-                  </th>
-                  <th className="w-56 px-4 py-3 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Ad / Creatività
-                  </th>
-                  <th className="w-20 px-3 py-3 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Ordini
-                  </th>
-                  <th className="w-28 px-3 py-3 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Revenue
-                  </th>
-                  <th className="w-24 px-3 py-3 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    AOV
-                  </th>
-                  <th className="w-32 px-3 py-3 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Decisione
-                  </th>
-                </tr>
-              </thead>
-              <tbody
-                className={
-                  darkMode
-                    ? "divide-y divide-gray-700"
-                    : "divide-y divide-gray-200"
-                }
-              >
-                {data.byCampaign.length === 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
                   <tr>
-                    <td
-                      colSpan={8}
-                      className="px-6 py-12 text-center"
-                    >
-                      <div className="flex flex-col items-center gap-3">
-                        <span className="text-5xl">🔍</span>
-                        <span className="font-semibold text-gray-600 dark:text-gray-400">
-                          Nessuna campagna trovata
-                        </span>
-                        <span className="text-sm text-gray-500">
-                          Prova a modificare i filtri
-                        </span>
-                      </div>
-                    </td>
+                    <th className="px-4 py-3 text-left">Fonte</th>
+                    <th className="px-4 py-3 text-left">Campagna</th>
+                    <th className="px-4 py-3 text-left">Ad Set</th>
+                    <th className="px-4 py-3 text-left">Creatività</th>
+                    <th className="px-4 py-3 text-right">Ordini</th>
+                    <th className="px-4 py-3 text-right">Revenue</th>
+                    <th className="px-4 py-3 text-right">AOV</th>
+                    <th className="px-4 py-3 text-center">Decisione</th>
                   </tr>
-                ) : (
-                  data.byCampaign.map((campaign, idx) => {
-                    const aov =
-                      campaign.purchases > 0
-                        ? campaign.revenue / campaign.purchases
-                        : 0
-                    const firstOrder = campaign.orders?.[0]
-                    const badge = getCampaignActionBadge(campaign)
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {data.byCampaignDetail.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-12 text-gray-400">
+                        🔍 Nessuna campagna trovata nel periodo selezionato
+                      </td>
+                    </tr>
+                  ) : data.byCampaignDetail.map((campaign, i) => {
+                    const badge = getDecisionBadge(campaign, data.avgOrderValue)
+                    const adSets = [...new Set(campaign.orders.map(o => o.adSet).filter(Boolean))]
+                    const adNames = [...new Set(campaign.orders.map(o => o.adName).filter(Boolean))]
+                    const isExpanded = expandedOrder === `campaign-${i}`
 
                     return (
-                      <tr
-                        key={idx}
-                        className={`${
-                          darkMode
-                            ? "hover:bg-gray-700/50"
-                            : "hover:bg-blue-50/50"
-                        } transition-all duration-150 border-l-4 border-transparent hover:border-blue-500`}
-                      >
-                        {/* Sorgente */}
-                        <td className="px-3 py-4">
-                          <span
-                            className="inline-flex items-center justify-center w-full px-2 py-1.5 rounded-lg text-xs font-bold shadow-sm"
-                            style={{
-                              backgroundColor: getSourceBadgeColor(
-                                campaign.source,
-                              ),
-                              color: "white",
-                            }}
-                          >
-                            {campaign.source}
-                          </span>
-                        </td>
-
-                        {/* Campagna */}
-                        <td className="px-4 py-4">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
-                              {campaign.campaign}
-                            </span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              {campaign.source} / {campaign.medium || "cpc"}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Ad Set */}
-                        <td className="px-4 py-4">
-                          {firstOrder?.adSet ? (
-                            <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                              <span className="text-blue-600 dark:text-blue-400 text-xl flex-shrink-0 mt-0.5">
-                                🎯
+                      <>
+                        <tr
+                          key={i}
+                          className="hover:bg-gray-50 cursor-pointer"
+                          onClick={() => setExpandedOrder(isExpanded ? null : `campaign-${i}`)}
+                        >
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1.5 font-medium">
+                              <span style={{ color: sourceColor[campaign.source] }}>
+                                {sourceEmoji[campaign.source] || "📌"}
                               </span>
-                              <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-sm font-bold text-blue-700 dark:text-blue-300 break-words leading-tight">
-                                  {firstOrder.adSet}
-                                </span>
-                                <span className="text-xs text-blue-600/70 dark:text-blue-400/70 font-medium">
-                                  Ad Set
-                                </span>
+                              {campaign.source}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-gray-800 max-w-48 truncate" title={campaign.campaign}>
+                              {campaign.campaign || "—"}
+                            </div>
+                            {campaign.campaignId && (
+                              <div className="text-xs text-gray-400">ID: {campaign.campaignId}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {adSets.length > 0 ? (
+                              <div>
+                                {adSets.slice(0, 2).map((a, j) => (
+                                  <div key={j} className="truncate max-w-32" title={a!}>{a}</div>
+                                ))}
+                                {adSets.length > 2 && <div className="text-gray-400">+{adSets.length - 2} altri</div>}
                               </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500 text-xs italic">
-                              <span>—</span>
-                              <span>Non disponibile</span>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Ad Name */}
-                        <td className="px-4 py-4">
-                          {firstOrder?.adName ? (
-                            <div className="flex items-start gap-2 p-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
-                              <span className="text-purple-600 dark:text-purple-400 text-xl flex-shrink-0 mt-0.5">
-                                🎨
-                              </span>
-                              <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-sm font-bold text-purple-700 dark:text-purple-300 break-words leading-tight">
-                                  {firstOrder.adName}
-                                </span>
-                                <span className="text-xs text-purple-600/70 dark:text-purple-400/70 font-medium">
-                                  Creatività
-                                </span>
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {adNames.length > 0 ? (
+                              <div>
+                                {adNames.slice(0, 2).map((a, j) => (
+                                  <div key={j} className="truncate max-w-32" title={a!}>{a}</div>
+                                ))}
+                                {adNames.length > 2 && <div className="text-gray-400">+{adNames.length - 2} altre</div>}
                               </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500 text-xs italic">
-                              <span>—</span>
-                              <span>Non disponibile</span>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Ordini */}
-                        <td className="px-3 py-4">
-                          <div className="flex flex-col items-center">
-                            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                              {campaign.purchases}
-                            </span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              ordini
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Revenue */}
-                        <td className="px-3 py-4 text-right">
-                          <div className="flex flex-col items-end">
-                            <span className="text-base font-bold text-green-600 dark:text-green-400">
-                              {formatMoney(campaign.revenue)}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* AOV */}
-                        <td className="px-3 py-4 text-right">
-                          <div className="flex flex-col items-end">
-                            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                              {formatMoney(aov)}
-                            </span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              medio
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Decisione */}
-                        <td className="px-3 py-4">
-                          <div className="flex flex-col items-center gap-2">
-                            <span
-                              className={`${badge.color} border px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm text-center w-full`}
-                            >
+                            ) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold">{campaign.totalOrders}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-green-700">{formatMoney(campaign.totalRevenue)}</td>
+                          <td className="px-4 py-3 text-right text-gray-600">{formatMoney(campaign.cpa)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <div className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
                               {badge.text}
-                            </span>
-                            <span className="text-xs text-gray-600 dark:text-gray-400 text-center">
-                              {badge.action}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-1">{badge.action}</div>
+                          </td>
+                        </tr>
+
+                        {/* RIGA ESPANSA - ordini dettagliati */}
+                        {isExpanded && (
+                          <tr key={`expanded-${i}`}>
+                            <td colSpan={8} className="bg-gray-50 px-6 py-4">
+                              <div className="text-xs font-semibold text-gray-600 mb-3 uppercase tracking-wider">
+                                Ordini di questa campagna
+                              </div>
+                              <div className="space-y-2">
+                                {campaign.orders.map((order, j) => (
+                                  <div key={j} className="bg-white rounded-lg p-3 border border-gray-100 flex flex-wrap gap-4 text-xs">
+                                    <div>
+                                      <span className="text-gray-400">Ordine</span>
+                                      <div className="font-semibold">#{order.orderNumber || "—"}</div>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Valore</span>
+                                      <div className="font-semibold text-green-700">{formatMoney(order.value)}</div>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-400">Data</span>
+                                      <div>{formatDate(order.timestamp)}</div>
+                                    </div>
+                                    {order.adSet && (
+                                      <div>
+                                        <span className="text-gray-400">Ad Set</span>
+                                        <div className="max-w-32 truncate">{order.adSet}</div>
+                                      </div>
+                                    )}
+                                    {order.adName && (
+                                      <div>
+                                        <span className="text-gray-400">Creatività</span>
+                                        <div className="max-w-32 truncate">{order.adName}</div>
+                                      </div>
+                                    )}
+                                    {order.customer && (
+                                      <div>
+                                        <span className="text-gray-400">Cliente</span>
+                                        <div className="truncate max-w-32">{order.customer}</div>
+                                      </div>
+                                    )}
+                                    {order.fbclid && (
+                                      <div>
+                                        <span className="text-gray-400">fbclid</span>
+                                        <div className="text-indigo-500 truncate max-w-24">{order.fbclid.slice(0, 10)}...</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )
-                  })
-                )}
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: PERCORSO ACQUISTO */}
+        {activeTab === "journey" && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <h3 className="font-semibold text-gray-800 mb-1">🗺️ Percorso di ogni acquisto</h3>
+              <p className="text-xs text-gray-400 mb-4">First touch → Last touch → Acquisto. Mostra come ogni cliente ti ha trovato e cosa lo ha convinto a comprare.</p>
+
+              <div className="space-y-3">
+                {data.recentPurchases.slice(0, 30).map((purchase, i) => {
+                  const { first, last, isMultiTouch } = getJourneySteps(purchase)
+                  const key = purchase.orderId || purchase.sessionId || String(i)
+
+                  return (
+                    <div
+                      key={key}
+                      className="border border-gray-100 rounded-xl p-4 hover:border-indigo-200 transition cursor-pointer"
+                      onClick={() => setExpandedOrder(expandedOrder === key ? null : key)}
+                    >
+                      {/* Header ordine */}
+                      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-gray-800">
+                            #{purchase.orderNumber || purchase.orderId?.slice(-6) || "—"}
+                          </span>
+                          <span className="text-sm font-bold text-green-600">{formatMoney(purchase.value)}</span>
+                          <span className="text-xs text-gray-400">{formatDate(purchase.timestamp)}</span>
+                        </div>
+                        {isMultiTouch && (
+                          <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-full font-medium">
+                            🔄 Multi-touch
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Percorso visuale */}
+                      <div className="flex items-center gap-2 flex-wrap text-sm">
+                        {/* PRIMO CLICK */}
+                        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-center min-w-24">
+                          <div className="text-xs text-gray-400 mb-0.5">1° Touch</div>
+                          <div className="font-semibold text-blue-700">
+                            {sourceEmoji[first.source] || "📌"} {first.source}
+                          </div>
+                          {first.campaign && (
+                            <div className="text-xs text-gray-500 truncate max-w-28" title={first.campaign}>
+                              {first.campaign}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Freccia */}
+                        <div className="text-gray-300 text-lg">→</div>
+
+                        {/* ULTIMO CLICK */}
+                        <div className={`border rounded-lg px-3 py-2 text-center min-w-24 ${
+                          isMultiTouch ? "bg-indigo-50 border-indigo-100" : "bg-gray-50 border-gray-100"
+                        }`}>
+                          <div className="text-xs text-gray-400 mb-0.5">Last Touch</div>
+                          <div className={`font-semibold ${isMultiTouch ? "text-indigo-700" : "text-gray-700"}`}>
+                            {sourceEmoji[last.source] || "📌"} {last.source}
+                          </div>
+                          {last.campaign && (
+                            <div className="text-xs text-gray-500 truncate max-w-28" title={last.campaign}>
+                              {last.campaign}
+                            </div>
+                          )}
+                          {last.adset && (
+                            <div className="text-xs text-indigo-400 truncate max-w-28" title={last.adset}>
+                              📂 {last.adset}
+                            </div>
+                          )}
+                          {last.ad && (
+                            <div className="text-xs text-indigo-400 truncate max-w-28" title={last.ad}>
+                              🎨 {last.ad}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Freccia */}
+                        <div className="text-gray-300 text-lg">→</div>
+
+                        {/* ACQUISTO */}
+                        <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-center min-w-24">
+                          <div className="text-xs text-gray-400 mb-0.5">Acquisto</div>
+                          <div className="font-bold text-green-700">{formatMoney(purchase.value)}</div>
+                          {purchase.customer?.city && (
+                            <div className="text-xs text-gray-400">📍 {purchase.customer.city}</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* DETTAGLIO ESPANSO */}
+                      {expandedOrder === key && (
+                        <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div>
+                            <div className="text-gray-400 uppercase tracking-wider mb-1">Cliente</div>
+                            <div>{purchase.customer?.fullName || "—"}</div>
+                            <div className="text-gray-400">{purchase.customer?.email || "—"}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400 uppercase tracking-wider mb-1">UTM completi</div>
+                            <div>src: {purchase.utm?.source || "—"}</div>
+                            <div>med: {purchase.utm?.medium || "—"}</div>
+                            <div>camp: {purchase.utm?.campaign || "—"}</div>
+                          </div>
+                          <div>
+                            <div className="text-gray-400 uppercase tracking-wider mb-1">Prodotti</div>
+                            {purchase.items?.map((item, j) => (
+                              <div key={j}>{item.quantity}x {item.title}</div>
+                            )) || <div>—</div>}
+                          </div>
+                          <div>
+                            <div className="text-gray-400 uppercase tracking-wider mb-1">Click IDs</div>
+                            {purchase.utm?.fbclid && <div>fb: {purchase.utm.fbclid.slice(0, 12)}...</div>}
+                            {purchase.utm?.gclid && <div>g: {purchase.utm.gclid.slice(0, 12)}...</div>}
+                            {purchase.utm?.ttclid && <div>tt: {purchase.utm.ttclid.slice(0, 12)}...</div>}
+                            {!purchase.utm?.fbclid && !purchase.utm?.gclid && !purchase.utm?.ttclid && <div>—</div>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: PRODOTTI */}
+        {activeTab === "products" && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800">📦 Performance Prodotti</h3>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 text-left">Prodotto</th>
+                  <th className="px-4 py-3 text-right">Quantità</th>
+                  <th className="px-4 py-3 text-right">Ordini</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
+                  <th className="px-4 py-3 text-right">Prezzo medio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {data.byProduct.map((product, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-800">{product.title}</td>
+                    <td className="px-4 py-3 text-right">{product.quantity}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">{product.orders}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-green-700">{formatMoney(product.revenue)}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">
+                      {formatMoney(product.revenue / product.orders)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-        </div>
+        )}
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          <div
-            className={`${
-              darkMode
-                ? "bg-gray-800 border-gray-700"
-                : "bg-white border-gray-200"
-            } rounded-lg shadow-sm border p-4 sm:p-6`}
-          >
-            <h2 className="text-lg sm:text-xl font-semibold mb-4">
-              📈 Revenue Giornaliera
-            </h2>
-            {data.dailyRevenue.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
-                <AreaChart data={data.dailyRevenue}>
-                  <defs>
-                    <linearGradient
-                      id="colorRevenue"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="5%"
-                        stopColor="#3B82F6"
-                        stopOpacity={0.8}
-                      />
-                      <stop
-                        offset="95%"
-                        stopColor="#3B82F6"
-                        stopOpacity={0}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke={
-                      darkMode ? "#374151" : "#E5E7EB"
-                    }
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={value =>
-                      formatShortDate(String(value))
-                    }
-                    stroke={
-                      darkMode ? "#9CA3AF" : "#6B7280"
-                    }
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis
-                    stroke={
-                      darkMode ? "#9CA3AF" : "#6B7280"
-                    }
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: darkMode
-                        ? "#1F2937"
-                        : "#FFFFFF",
-                      border: `1px solid ${
-                        darkMode ? "#374151" : "#E5E7EB"
-                      }`,
-                      borderRadius: "8px",
-                    }}
-                    formatter={(value: any) => [
-                      formatMoney(value),
-                      "Revenue",
-                    ]}
-                    labelFormatter={(label: any) =>
-                      formatShortDate(String(label))
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="#3B82F6"
-                    fillOpacity={1}
-                    fill="url(#colorRevenue)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <p
-                className={
-                  darkMode ? "text-gray-400" : "text-gray-500"
-                }
-              >
-                Nessun dato disponibile
-              </p>
-            )}
-          </div>
-
-          <div
-            className={`${
-              darkMode
-                ? "bg-gray-800 border-gray-700"
-                : "bg-white border-gray-200"
-            } rounded-lg shadow-sm border p-4 sm:p-6`}
-          >
-            <h2 className="text-lg sm:text-xl font-semibold mb-4">
-              🥧 Revenue per Sorgente
-            </h2>
-            {data.bySource.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={data.bySource}
-                    dataKey="revenue"
-                    nameKey="source"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    label={(entry: any) => `${entry.source}`}
-                    labelLine={false}
-                  >
-                    {data.bySource.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={
-                          PIE_COLORS[
-                            index % PIE_COLORS.length
-                          ]
-                        }
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: darkMode
-                        ? "#1F2937"
-                        : "#FFFFFF",
-                      border: `1px solid ${
-                        darkMode ? "#374151" : "#E5E7EB"
-                      }`,
-                      borderRadius: "8px",
-                    }}
-                    formatter={(value: any) => [
-                      formatMoney(value),
-                      "Revenue",
-                    ]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p
-                className={
-                  darkMode ? "text-gray-400" : "text-gray-500"
-                }
-              >
-                Nessun dato disponibile
-              </p>
-            )}
-          </div>
-        </div>
       </div>
-
-      <style jsx global>{`
-        @keyframes slide-in-right {
-          from {
-            transform: translateX(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-        @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-slide-in-right {
-          animation: slide-in-right 0.3s ease-out;
-        }
-        .animate-fade-in {
-          animation: fade-in 0.5s ease-out forwards;
-          opacity: 0;
-        }
-      `}</style>
     </div>
   )
 }
