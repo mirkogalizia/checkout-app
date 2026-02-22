@@ -249,8 +249,28 @@ function ThankYouContent() {
         setOrderData({ shopifyOrderNumber: data.shopifyOrderNumber, shopifyOrderId: data.shopifyOrderId, email: data.customer?.email, subtotalCents: subtotal, shippingCents: shipping, discountCents: discount, totalCents: finalTotal, currency: data.currency || "EUR", shopDomain: data.shopDomain, paymentIntentId: data.paymentIntentId, rawCart: data.rawCart, items: data.items || [], customer: data.customer })
         setTimeout(() => setVisible(true), 50)
         if (typeof window !== "undefined" && (window as any).fbq) { try { (window as any).fbq("track", "PageView") } catch {} }
-        const sendGA = () => { if (!(window as any).gtag) return; const a = data.rawCart?.attributes || {}; ;(window as any).gtag("event","conversion",{ send_to:"AW-17960095093/dvWzCKSd8fsbEPWahfRC", value: finalTotal/100, currency: data.currency||"EUR", transaction_id: data.shopifyOrderNumber||data.shopifyOrderId||sessionId, utm_source: a._wt_last_source||"", utm_medium: a._wt_last_medium||"", utm_campaign: a._wt_last_campaign||"" }) }
-        if ((window as any).gtag) sendGA(); else { const t = setInterval(()=>{ if ((window as any).gtag){clearInterval(t);sendGA()} },100); setTimeout(()=>clearInterval(t),5000) }
+
+        // ── GOOGLE ADS CONVERSION ─────────────────────────────────────────
+        // FIX 1: ID corretto AW-17960095093 (era AW-17925038279)
+        // FIX 2: value reale dell'ordine in float (era 1.0 fisso)
+        // FIX 3: transaction_id per deduplicazione (era stringa vuota '')
+        const sendGA = () => {
+          if (!(window as any).gtag) return
+          const a = data.rawCart?.attributes || {}
+          ;(window as any).gtag("event", "conversion", {
+            send_to:        "AW-17960095093/dvWzCKSd8fsbEPWahfRC", // ✅ ID corretto
+            value:          parseFloat((finalTotal / 100).toFixed(2)), // ✅ float reale, non 1.0
+            currency:       (data.currency || "EUR").toUpperCase(),
+            transaction_id: String(data.shopifyOrderNumber || data.shopifyOrderId || sessionId), // ✅ deduplicazione
+            utm_source:     a._wt_last_source   || "",
+            utm_medium:     a._wt_last_medium   || "",
+            utm_campaign:   a._wt_last_campaign || "",
+          })
+        }
+        if ((window as any).gtag) sendGA()
+        else { const t = setInterval(() => { if ((window as any).gtag) { clearInterval(t); sendGA() } }, 100); setTimeout(() => clearInterval(t), 5000) }
+        // ─────────────────────────────────────────────────────────────────
+
         const a = data.rawCart?.attributes||{}
         fetch("/api/analytics/purchase",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ orderId:data.shopifyOrderId||sessionId, orderNumber:data.shopifyOrderNumber||null, sessionId, timestamp:new Date().toISOString(), value:finalTotal/100, valueCents:finalTotal, subtotalCents:subtotal, shippingCents:shipping, discountCents:discount, currency:data.currency||"EUR", itemCount:(data.items||[]).length, utm:{ source:a._wt_last_source||null, medium:a._wt_last_medium||null, campaign:a._wt_last_campaign||null, content:a._wt_last_content||null, fbclid:a._wt_last_fbclid||null, gclid:a._wt_last_gclid||null, campaign_id:a._wt_last_campaign_id||null, adset_id:a._wt_last_adset_id||null, adset_name:a._wt_last_adset_name||null, ad_id:a._wt_last_ad_id||null, ad_name:a._wt_last_ad_name||null }, utm_first:{ source:a._wt_first_source||null, medium:a._wt_first_medium||null, campaign:a._wt_first_campaign||null, referrer:a._wt_first_referrer||null, landing:a._wt_first_landing||null, fbclid:a._wt_first_fbclid||null }, customer:{ email:data.customer?.email||null, fullName:data.customer?.fullName||null, city:data.customer?.city||null, postalCode:data.customer?.postalCode||null, countryCode:data.customer?.countryCode||null }, items:(data.items||[]).map((i:any)=>({ id:i.id||i.variant_id, title:i.title, quantity:i.quantity, priceCents:i.priceCents||0, linePriceCents:i.linePriceCents||0 })), shopDomain:data.shopDomain||"notforresale.it" }) }).catch(()=>{})
         if (data.rawCart?.id||data.rawCart?.token) { const cartId=data.rawCart.id||`gid://shopify/Cart/${data.rawCart.token}`; fetch("/api/clear-cart",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cartId,sessionId})}).catch(()=>{}) }
@@ -267,42 +287,25 @@ function ThankYouContent() {
     setQuickAdding(true)
     setQuickError(null)
     try {
-      // Prendi taglia/colore dal primo item dell'ordine originale
       const firstItem = orderData.items?.[0]
       const variantTitle = firstItem?.variantTitle || ""
-
-      // Fetch prodotti upsell per trovare la t-shirt interstellar con stessa variante
       const productsRes = await fetch("/api/upsell-products")
       const productsData = await productsRes.json()
-      const tshirt = productsData.products?.find((p: any) =>
-        p.handle.includes("t-shirt")
-      )
+      const tshirt = productsData.products?.find((p: any) => p.handle.includes("t-shirt"))
       if (!tshirt) throw new Error("Prodotto non trovato")
-
-      // Cerca variante che matcha taglia/colore originale, altrimenti prima disponibile
       const matchingVariant = tshirt.variants.find((v: any) =>
         v.availableForSale && variantTitle &&
         v.title.toLowerCase().includes(variantTitle.split(" / ")[0]?.toLowerCase() || "")
       ) || tshirt.variants.find((v: any) => v.availableForSale)
-
       if (!matchingVariant) throw new Error("Variante non disponibile")
-
       const res = await fetch("/api/upsell-charge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          variantId: matchingVariant.id,
-          variantTitle: matchingVariant.title,
-          productTitle: tshirt.title,
-          priceCents: 745,
-          image: tshirt.image,
-        }),
+        body: JSON.stringify({ sessionId, variantId: matchingVariant.id, variantTitle: matchingVariant.title, productTitle: tshirt.title, priceCents: 745, image: tshirt.image }),
       })
       const data = await res.json()
       if (!res.ok) { setQuickError(data.error || "Errore"); return }
       setQuickDone(true)
-      // Redirect al negozio dopo 1.5s
       setTimeout(() => { window.location.href = `https://${orderData.shopDomain || "notforresale.it"}` }, 1500)
     } catch (err: any) {
       setQuickError(err.message || "Errore di connessione")
@@ -336,8 +339,10 @@ function ThankYouContent() {
   return (
     <>
       <Script id="facebook-pixel" strategy="afterInteractive">{`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${process.env.NEXT_PUBLIC_FB_PIXEL_ID}');`}</Script>
-      <Script src="https://www.googletagmanager.com/gtag/js?id=AW-17925038279" strategy="afterInteractive" />
-      <Script id="google-ads-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html:`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-17925038279');` }} />
+
+      {/* ✅ FIX: ID corretto AW-17960095093 (era AW-17925038279 in entrambe le righe) */}
+      <Script src="https://www.googletagmanager.com/gtag/js?id=AW-17960095093" strategy="afterInteractive" />
+      <Script id="google-ads-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html:`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-17960095093');` }} />
 
       <style>{`
         @keyframes ty-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
@@ -479,16 +484,7 @@ function ThankYouContent() {
               <button
                 onClick={handleQuickUpsell}
                 disabled={quickAdding}
-                style={{
-                  display:"block", width:"100%", padding:"13px 16px",
-                  background:"transparent",
-                  border:"1px solid rgba(0,0,0,0.12)",
-                  borderRadius:12,
-                  textAlign:"center",
-                  cursor: quickAdding ? "not-allowed" : "pointer",
-                  boxSizing:"border-box",
-                  transition:"all .15s",
-                }}
+                style={{ display:"block", width:"100%", padding:"13px 16px", background:"transparent", border:"1px solid rgba(0,0,0,0.12)", borderRadius:12, textAlign:"center", cursor: quickAdding ? "not-allowed" : "pointer", boxSizing:"border-box", transition:"all .15s" }}
               >
                 {quickAdding ? (
                   <span style={{ fontSize:13, color:"#86868b" }}>Elaborazione...</span>
@@ -504,9 +500,7 @@ function ThankYouContent() {
 
           {quickDone && (
             <div className="ty-fade ty-1" style={{ marginBottom:12, padding:"14px 16px", background:"#f0faf4", border:"1px solid #34c759", borderRadius:12, textAlign:"center" }}>
-              <p style={{ fontSize:13, color:"#1a7a40", fontWeight:600, margin:0 }}>
-                ✓ T-Shirt aggiunta! Redirect al negozio...
-              </p>
+              <p style={{ fontSize:13, color:"#1a7a40", fontWeight:600, margin:0 }}>✓ T-Shirt aggiunta! Redirect al negozio...</p>
             </div>
           )}
 
@@ -539,3 +533,4 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
+
