@@ -58,7 +58,7 @@ const MOCK_DATA = {
 const fmt = (v: number) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(v)
 const fmtShort = (v: number) => v >= 1000 ? `€${(v/1000).toFixed(1)}k` : `€${v.toFixed(0)}`
 
-const SOURCE_CONFIG = {
+const SOURCE_CONFIG: Record<string, { color: string; bg: string; icon: string; gradient: string }> = {
   Meta:    { color: "#1877F2", bg: "rgba(24,119,242,0.12)", icon: "📘", gradient: "from-blue-500 to-blue-700" },
   Google:  { color: "#EA4335", bg: "rgba(234,67,53,0.12)",  icon: "🔍", gradient: "from-red-500 to-red-700" },
   TikTok:  { color: "#ffffff", bg: "rgba(255,255,255,0.08)", icon: "🎵", gradient: "from-gray-200 to-gray-400" },
