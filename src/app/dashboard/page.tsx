@@ -55,8 +55,8 @@ const MOCK_DATA = {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const fmt = (v) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(v)
-const fmtShort = (v) => v >= 1000 ? `€${(v/1000).toFixed(1)}k` : `€${v.toFixed(0)}`
+const fmt = (v: number) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(v)
+const fmtShort = (v: number) => v >= 1000 ? `€${(v/1000).toFixed(1)}k` : `€${v.toFixed(0)}`
 
 const SOURCE_CONFIG = {
   Meta:    { color: "#1877F2", bg: "rgba(24,119,242,0.12)", icon: "📘", gradient: "from-blue-500 to-blue-700" },
@@ -79,7 +79,7 @@ function getDecision(campaign, avgAov) {
 }
 
 // ─── SPARKLINE ────────────────────────────────────────────────────────────────
-function Sparkline({ data, color = "#22C55E", height = 40 }) {
+function Sparkline({ data, color = "#22C55E", height = 40 }: { data: number[]; color?: string; height?: number }) {
   const max = Math.max(...data, 1)
   const min = Math.min(...data)
   const range = max - min || 1
@@ -105,7 +105,7 @@ function Sparkline({ data, color = "#22C55E", height = 40 }) {
 }
 
 // ─── KPI CARD ─────────────────────────────────────────────────────────────────
-function KPICard({ label, value, sub, trend, sparkData, color = "#22C55E", icon }) {
+function KPICard({ label, value, sub, trend, sparkData, color = "#22C55E", icon }: { label: string; value: string | number; sub?: string; trend?: number; sparkData?: number[]; color?: string; icon?: string }) {
   return (
     <div style={{
       background: "rgba(255,255,255,0.03)",
@@ -148,7 +148,7 @@ function KPICard({ label, value, sub, trend, sparkData, color = "#22C55E", icon 
 }
 
 // ─── MINI BAR ─────────────────────────────────────────────────────────────────
-function MiniBar({ value, max, color }) {
+function MiniBar({ value, max, color }: { value: number; max: number; color: string }) {
   return (
     <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
       <div style={{ height: "100%", width: `${(value / max) * 100}%`, background: color, borderRadius: 2, transition: "width 0.8s ease" }} />
@@ -157,9 +157,9 @@ function MiniBar({ value, max, color }) {
 }
 
 // ─── REVENUE CHART ────────────────────────────────────────────────────────────
-function RevenueChart({ data }) {
+function RevenueChart({ data }: { data: Array<{ date: string; revenue: number }> }) {
   const max = Math.max(...data.map(d => d.revenue), 1)
-  const [hoveredIdx, setHoveredIdx] = useState(null)
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80, paddingTop: 8 }}>
       {data.map((d, i) => {
@@ -189,7 +189,7 @@ function RevenueChart({ data }) {
 }
 
 // ─── HOURLY HEATMAP ───────────────────────────────────────────────────────────
-function HourlyChart({ data }) {
+function HourlyChart({ data }: { data: Array<{ hour: number; revenue: number }> }) {
   const max = Math.max(...data.map(d => d.revenue), 1)
   return (
     <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 50 }}>
@@ -205,7 +205,7 @@ function HourlyChart({ data }) {
 }
 
 // ─── SOURCE PIE ───────────────────────────────────────────────────────────────
-function SourceDonut({ sources }) {
+function SourceDonut({ sources }: { sources: Array<{ source: string; revenue: number; purchases: number }> }) {
   const total = sources.reduce((s, x) => s + x.revenue, 0)
   let cum = 0
   const size = 80, cx = 40, cy = 40, r = 30, inner = 18
@@ -241,7 +241,7 @@ function SourceDonut({ sources }) {
 }
 
 // ─── JOURNEY BADGE ────────────────────────────────────────────────────────────
-function JourneyBadge({ source, campaign, label }) {
+function JourneyBadge({ source, campaign, label }: { source: string; campaign?: string; label: string }) {
   const cfg = SOURCE_CONFIG[source] || { color: "#A3A3A3", bg: "rgba(163,163,163,0.1)" }
   return (
     <div style={{ background: cfg.bg, border: `1px solid ${cfg.color}30`, borderRadius: 10, padding: "8px 12px", textAlign: "center", minWidth: 90 }}>
@@ -256,7 +256,7 @@ function JourneyBadge({ source, campaign, label }) {
 export default function NFRDashboard() {
   const [mode, setMode] = useState("lite") // "lite" | "pro"
   const [tab, setTab] = useState("overview")
-  const [expanded, setExpanded] = useState(null)
+  const [expanded, setExpanded] = useState<string | number | null>(null)
   const data = MOCK_DATA
   const sparkRevenue = data.dailyRevenue.map(d => d.revenue)
   const maxCampaignRevenue = Math.max(...data.byCampaignDetail.map(c => c.totalRevenue), 1)
