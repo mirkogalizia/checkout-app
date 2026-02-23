@@ -66,7 +66,7 @@ const SOURCE_CONFIG = {
   Organic: { color: "#22C55E", bg: "rgba(34,197,94,0.12)",  icon: "🌱", gradient: "from-green-500 to-green-700" },
 }
 
-function getDecision(campaign, avgAov) {
+function getDecision(campaign: { totalOrders: number; cpa: number; source: string; campaign: string }, avgAov: number) {
   if (campaign.totalOrders >= 5 && campaign.cpa >= avgAov * 0.9)
     return { label: "SCALA", color: "#22C55E", bg: "rgba(34,197,94,0.15)", border: "rgba(34,197,94,0.3)", hint: "↑ Budget +20%" }
   if (campaign.totalOrders >= 3 && campaign.cpa >= avgAov * 0.7)
