@@ -202,7 +202,6 @@ export async function POST(req: NextRequest) {
           request_three_d_secure: "automatic",
         },
       },
-      setup_future_usage: "off_session",
       ...(shipping && { shipping }),
       metadata: {
         session_id: sessionId,
@@ -230,10 +229,6 @@ export async function POST(req: NextRequest) {
 
     const paymentIntent = await stripe.paymentIntents.create(params)
     console.log(`[payment-intent] ✅ PI creato: ${paymentIntent.id}`)
-
-    // ─── SetupIntent per mandate MIT (upsell off-session) ────────────────────
-    // Creato in parallelo, non blocca il flusso se fallisce
-    
 
     // ─── Salva su Firestore ───────────────────────────────────────────────────
     const updateData: Record<string, any> = {
