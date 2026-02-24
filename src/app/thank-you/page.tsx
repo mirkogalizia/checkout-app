@@ -43,185 +43,9 @@ type OrderData = {
   }
 }
 
-type UpsellVariant = {
-  id: string
-  title: string
-  availableForSale: boolean
-  priceCents: number
-  selectedOptions: { name: string; value: string }[]
-  image: string | null
-}
 
-type UpsellProduct = {
-  handle: string
-  title: string
-  image: string | null
-  options: { name: string; values: string[] }[]
-  variants: UpsellVariant[]
-}
 
-const COLOR_MAP: Record<string, string> = {
-  nero: "#111", black: "#111",
-  bianco: "#fafafa", white: "#fafafa",
-  panna: "#f0ebe0", cream: "#f0ebe0",
-  navy: "#1a2340", army: "#4a5240",
-  bordeaux: "#6b1a1a",
-  grigio: "#888", grey: "#888", gray: "#888",
-  "dark grey": "#555", "dark gray": "#555",
-  beige: "#d4c5a9", brown: "#8b5e3c",
-  sand: "#c4b49a", verde: "#3a6b35",
-  rosso: "#c8251f", red: "#c8251f",
-  blu: "#1a3a7a", blue: "#1a3a7a",
-  "sport grey": "#9ea5a8",
-  "sport gray": "#9ea5a8",
-  "dark chocolate": "#3d1f10",
-}
 
-function UpsellBlock({ sessionId }: { sessionId: string }) {
-  const [products, setProducts] = useState<UpsellProduct[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selectedIdx, setSelectedIdx] = useState(0)
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({})
-  const [adding, setAdding] = useState(false)
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch("/api/upsell-products")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.products?.length) {
-          setProducts(data.products)
-          const defaults: Record<string, string> = {}
-          data.products[0].options?.forEach((opt: any) => {
-            if (opt.values?.length) defaults[opt.name] = opt.values[0]
-          })
-          setSelectedOptions(defaults)
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    const product = products[selectedIdx]
-    if (!product) return
-    const defaults: Record<string, string> = {}
-    product.options?.forEach((opt) => {
-      if (opt.values?.length) defaults[opt.name] = opt.values[0]
-    })
-    setSelectedOptions(defaults)
-    setError(null)
-  }, [selectedIdx, products])
-
-  const currentProduct = products[selectedIdx]
-  const matchedVariant = currentProduct?.variants.find((v) =>
-    v.selectedOptions.every((o) => selectedOptions[o.name] === o.value)
-  )
-  const activeVariant = matchedVariant || currentProduct?.variants.find((v) => v.availableForSale)
-  const fullPriceCents = activeVariant?.priceCents || 0
-  const discountedCents = Math.round(fullPriceCents / 2)
-  const savedCents = fullPriceCents - discountedCents
-  const fmt = (cents: number) => "€" + (cents / 100).toFixed(2).replace(".", ",")
-
-  const handleAdd = async () => {
-    if (!currentProduct || !activeVariant?.availableForSale) { setError("Variante non disponibile"); return }
-    setAdding(true); setError(null)
-    try {
-      const res = await fetch("/api/upsell-charge", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, variantId: activeVariant.id, variantTitle: activeVariant.title, productTitle: currentProduct.title, priceCents: discountedCents, image: currentProduct.image }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setError(data.error || "Errore"); return }
-      setDone(true)
-    } catch { setError("Errore di connessione. Riprova.") }
-    finally { setAdding(false) }
-  }
-
-  if (loading || !currentProduct) return null
-
-  if (done) return (
-    <div style={{ background: "linear-gradient(135deg,#0d2e1a,#0a1f12)", border: "1px solid #1d5c30", borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
-      <div style={{ fontSize: 44, marginBottom: 12 }}>✅</div>
-      <p style={{ color: "#fff", fontWeight: 800, fontSize: 20, marginBottom: 6, fontFamily: "Georgia,serif" }}>Aggiunto al tuo ordine!</p>
-      <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 14, margin: 0 }}>Conferma via email. Spedito insieme al tuo ordine.</p>
-    </div>
-  )
-
-  return (
-    <div style={{ background: "#0a0a0a", borderRadius: 20, overflow: "hidden", border: "1px solid #1e1e1e" }}>
-      <div style={{ background: "linear-gradient(90deg,#c8251f,#a01c18)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase" }}>⚡ Offerta esclusiva post-acquisto</span>
-        <span style={{ background: "#fff", color: "#c8251f", fontWeight: 900, fontSize: 13, padding: "2px 12px", borderRadius: 20 }}>−50%</span>
-      </div>
-      <div style={{ padding: 20 }}>
-        {products.length > 1 && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-            {products.map((p, i) => (
-              <button key={p.handle} onClick={() => setSelectedIdx(i)} style={{ flex: 1, padding: "10px 8px", background: selectedIdx === i ? "#fff" : "rgba(255,255,255,0.06)", color: selectedIdx === i ? "#000" : "rgba(255,255,255,0.45)", border: "none", borderRadius: 10, fontSize: 11, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: ".06em", transition: "all .15s" }}>
-                {i === 0 ? "🧥 Hoodie" : "👕 T-Shirt"}
-              </button>
-            ))}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-          {currentProduct.image && (
-            <div style={{ width: 116, flexShrink: 0, aspectRatio: "1/1", background: "#f2f2f0", borderRadius: 12, overflow: "hidden", position: "relative" }}>
-              <img src={currentProduct.image} alt={currentProduct.title} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 8, display: "block" }} />
-              <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "#c8251f", color: "#fff", fontSize: 9, fontWeight: 900, textAlign: "center", padding: "4px 0", letterSpacing: ".08em" }}>−50%</div>
-            </div>
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ color: "#fff", fontWeight: 700, fontSize: 13, textTransform: "uppercase", lineHeight: 1.3, marginBottom: 10 }}>{currentProduct.title}</p>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ fontSize: 28, fontWeight: 900, color: "#fff", lineHeight: 1 }}>{fmt(discountedCents)}</span>
-                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.28)", textDecoration: "line-through" }}>{fmt(fullPriceCents)}</span>
-              </div>
-              <span style={{ display: "inline-block", marginTop: 6, background: "rgba(200,37,31,0.18)", border: "1px solid rgba(200,37,31,0.4)", color: "#ff7070", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20 }}>
-                🔥 Risparmi {fmt(savedCents)}
-              </span>
-            </div>
-            {currentProduct.options.map((opt) => {
-              const isColor = opt.name.toLowerCase().includes("col") || opt.name.toLowerCase() === "color"
-              return (
-                <div key={opt.name} style={{ marginBottom: 10 }}>
-                  <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, letterSpacing: ".18em", textTransform: "uppercase", marginBottom: 6 }}>
-                    {opt.name}: <span style={{ color: "#fff" }}>{selectedOptions[opt.name] || "—"}</span>
-                  </p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {opt.values.map((val) => {
-                      const available = currentProduct.variants.some((v) => v.availableForSale && v.selectedOptions.some((o) => o.name === opt.name && o.value === val))
-                      const selected = selectedOptions[opt.name] === val
-                      const colorBg = COLOR_MAP[val.toLowerCase()]
-                      if (isColor && colorBg) {
-                        const isLight = ["#fafafa","#f0ebe0","#d4c5a9","#c4b49a","#9ea5a8"].includes(colorBg)
-                        return (
-                          <button key={val} title={val} onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))} style={{ width: 28, height: 28, borderRadius: "50%", background: colorBg, border: selected ? "2.5px solid #fff" : isLight ? "1.5px solid rgba(255,255,255,0.3)" : "1.5px solid rgba(255,255,255,0.1)", cursor: available ? "pointer" : "not-allowed", opacity: available ? 1 : 0.2, transform: selected ? "scale(1.2)" : "scale(1)", boxShadow: selected ? "0 0 0 3px rgba(255,255,255,0.35)" : "none", transition: "all .12s", flexShrink: 0 }} />
-                        )
-                      }
-                      return (
-                        <button key={val} onClick={() => available && setSelectedOptions((p) => ({ ...p, [opt.name]: val }))} style={{ height: 28, minWidth: 36, padding: "0 9px", background: selected ? "#fff" : "rgba(255,255,255,0.07)", color: selected ? "#000" : available ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.18)", border: selected ? "2px solid #fff" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: available ? "pointer" : "not-allowed", textDecoration: available ? "none" : "line-through", transition: "all .12s" }}>
-                          {val}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-        {error && <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(200,37,31,0.12)", border: "1px solid rgba(200,37,31,0.3)", borderRadius: 8, color: "#ff8080", fontSize: 12 }}>⚠️ {error}</div>}
-        <button onClick={handleAdd} disabled={adding} style={{ marginTop: 16, width: "100%", height: 52, background: adding ? "#222" : "#fff", color: adding ? "rgba(255,255,255,0.4)" : "#000", border: "none", borderRadius: 12, fontSize: 13, fontWeight: 900, letterSpacing: ".07em", textTransform: "uppercase", cursor: adding ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all .15s", boxShadow: adding ? "none" : "0 4px 20px rgba(255,255,255,0.12)" }}>
-          {adding ? (<><svg style={{ width: 16, height: 16, animation: "ty-spin 1s linear infinite" }} fill="none" viewBox="0 0 24 24"><circle style={{ opacity: .2 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path style={{ opacity: .7 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Addebito...</>) : <>⚡ Aggiungi ora · solo {fmt(discountedCents)}</>}
-        </button>
-        <p style={{ textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: 10, marginTop: 8, letterSpacing: ".04em" }}>🔒 Carta già usata · Nessun reindirizzamento · Spedizione inclusa</p>
-      </div>
-    </div>
-  )
-}
 
 function ThankYouContent() {
   const searchParams = useSearchParams()
@@ -230,9 +54,7 @@ function ThankYouContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
-  const [quickAdding, setQuickAdding] = useState(false)
-  const [quickDone, setQuickDone] = useState(false)
-  const [quickError, setQuickError] = useState<string | null>(null)
+
 
   useEffect(() => {
     async function load() {
@@ -282,37 +104,7 @@ function ThankYouContent() {
 
   const fmt = (cents:number|undefined) => new Intl.NumberFormat("it-IT",{ style:"currency", currency:orderData?.currency||"EUR", minimumFractionDigits:2 }).format((cents??0)/100)
 
-  const handleQuickUpsell = async () => {
-    if (!sessionId || !orderData) return
-    setQuickAdding(true)
-    setQuickError(null)
-    try {
-      const firstItem = orderData.items?.[0]
-      const variantTitle = firstItem?.variantTitle || ""
-      const productsRes = await fetch("/api/upsell-products")
-      const productsData = await productsRes.json()
-      const tshirt = productsData.products?.find((p: any) => p.handle.includes("t-shirt"))
-      if (!tshirt) throw new Error("Prodotto non trovato")
-      const matchingVariant = tshirt.variants.find((v: any) =>
-        v.availableForSale && variantTitle &&
-        v.title.toLowerCase().includes(variantTitle.split(" / ")[0]?.toLowerCase() || "")
-      ) || tshirt.variants.find((v: any) => v.availableForSale)
-      if (!matchingVariant) throw new Error("Variante non disponibile")
-      const res = await fetch("/api/upsell-charge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, variantId: matchingVariant.id, variantTitle: matchingVariant.title, productTitle: tshirt.title, priceCents: 745, image: tshirt.image }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setQuickError(data.error || "Errore"); return }
-      setQuickDone(true)
-      setTimeout(() => { window.location.href = `https://${orderData.shopDomain || "notforresale.it"}` }, 1500)
-    } catch (err: any) {
-      setQuickError(err.message || "Errore di connessione")
-    } finally {
-      setQuickAdding(false)
-    }
-  }
+
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#000", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
@@ -390,11 +182,6 @@ function ThankYouContent() {
                 <span style={{ fontSize:13, color:"#3a3a3c" }}>Conferma inviata a <strong>{orderData.email}</strong></span>
               </div>
             )}
-          </div>
-
-          {/* UPSELL — prima di tutto */}
-          <div className={visible?"ty-fade ty-2":""}>
-            {sessionId && <UpsellBlock sessionId={sessionId} />}
           </div>
 
           {/* PRODOTTI */}
@@ -475,35 +262,6 @@ function ThankYouContent() {
             </a>
           </div>
 
-          {/* QUICK PROMO BUTTON */}
-          {!quickDone && (
-            <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:12 }}>
-              {quickError && (
-                <p style={{ textAlign:"center", color:"#c8251f", fontSize:11, marginBottom:6 }}>⚠️ {quickError}</p>
-              )}
-              <button
-                onClick={handleQuickUpsell}
-                disabled={quickAdding}
-                style={{ display:"block", width:"100%", padding:"13px 16px", background:"transparent", border:"1px solid rgba(0,0,0,0.12)", borderRadius:12, textAlign:"center", cursor: quickAdding ? "not-allowed" : "pointer", boxSizing:"border-box", transition:"all .15s" }}
-              >
-                {quickAdding ? (
-                  <span style={{ fontSize:13, color:"#86868b" }}>Elaborazione...</span>
-                ) : (
-                  <span style={{ fontSize:13, color:"#86868b" }}>
-                    Grazie per la promo 🙏 — aggiungi anche la T-Shirt Interstellar a{" "}
-                    <strong style={{ color:"#000" }}>€7,45</strong>
-                  </span>
-                )}
-              </button>
-            </div>
-          )}
-
-          {quickDone && (
-            <div className="ty-fade ty-1" style={{ marginBottom:12, padding:"14px 16px", background:"#f0faf4", border:"1px solid #34c759", borderRadius:12, textAlign:"center" }}>
-              <p style={{ fontSize:13, color:"#1a7a40", fontWeight:600, margin:0 }}>✓ T-Shirt aggiunta! Redirect al negozio...</p>
-            </div>
-          )}
-
           {/* FOOTER */}
           <div className={visible?"ty-fade ty-5":""} style={{ textAlign:"center", padding:"20px 0 8px" }}>
             <p style={{ fontSize:13, color:"#86868b", marginBottom:12 }}>
@@ -533,4 +291,3 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
-
