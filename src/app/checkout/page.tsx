@@ -59,6 +59,139 @@ type CustomerForm = {
   countryCode: string
 }
 
+
+// ── GEO CONFIG ────────────────────────────────────────────────────────
+type GeoLabels = {
+  contacts: string; delivery: string; payment: string
+  firstName: string; lastName: string; address: string
+  address2: string; city: string; postalCode: string
+  province: string; phone: string; company: string
+  country: string; emailUpdates: string; saveInfo: string
+  pay: string; shipping: string; billing: string
+  shippingMethod: string; email: string
+}
+
+type GeoConfig = {
+  countryCode: string
+  phonePrefix: string
+  labels: GeoLabels
+}
+
+const GEO_CONFIG: Record<string, GeoConfig> = {
+  IT: {
+    countryCode: "IT", phonePrefix: "+39",
+    labels: {
+      contacts: "Contatti", delivery: "Consegna", payment: "Pagamento",
+      firstName: "Nome", lastName: "Cognome", address: "Indirizzo",
+      address2: "Interno, scala, ecc. (facoltativo)", city: "Città",
+      postalCode: "CAP", province: "Provincia", phone: "Telefono",
+      company: "Azienda (facoltativo)", country: "Paese / Regione",
+      emailUpdates: "{geo.labels.emailUpdates}",
+      saveInfo: "{geo.labels.saveInfo}",
+      pay: "{geo.labels.pay}", shipping: "Spedizione",
+      billing: "Fatturazione", shippingMethod: "Metodo di spedizione",
+      email: "Email",
+    }
+  },
+  ES: {
+    countryCode: "ES", phonePrefix: "+34",
+    labels: {
+      contacts: "Contacto", delivery: "Entrega", payment: "Pago",
+      firstName: "Nombre", lastName: "Apellido", address: "Dirección",
+      address2: "Piso, escalera, etc. (opcional)", city: "Ciudad",
+      postalCode: "Código postal", province: "Provincia", phone: "Teléfono",
+      company: "Empresa (opcional)", country: "País / Región",
+      emailUpdates: "Envíame emails con novedades y ofertas",
+      saveInfo: "Guardar estos datos para la próxima vez",
+      pay: "Pagar de forma segura", shipping: "Envío",
+      billing: "Facturación", shippingMethod: "Método de envío",
+      email: "Correo electrónico",
+    }
+  },
+  FR: {
+    countryCode: "FR", phonePrefix: "+33",
+    labels: {
+      contacts: "Contact", delivery: "Livraison", payment: "Paiement",
+      firstName: "Prénom", lastName: "Nom", address: "Adresse",
+      address2: "Appartement, étage, etc. (facultatif)", city: "Ville",
+      postalCode: "Code postal", province: "Région", phone: "Téléphone",
+      company: "Société (facultatif)", country: "Pays / Région",
+      emailUpdates: "Recevez nos emails avec actualités et offres",
+      saveInfo: "Enregistrer ces informations pour la prochaine fois",
+      pay: "Payer en sécurité", shipping: "Livraison",
+      billing: "Facturation", shippingMethod: "Mode de livraison",
+      email: "Email",
+    }
+  },
+  DE: {
+    countryCode: "DE", phonePrefix: "+49",
+    labels: {
+      contacts: "Kontakt", delivery: "Lieferung", payment: "Zahlung",
+      firstName: "Vorname", lastName: "Nachname", address: "Adresse",
+      address2: "Wohnung, Stockwerk usw. (optional)", city: "Stadt",
+      postalCode: "PLZ", province: "Bundesland", phone: "Telefon",
+      company: "Unternehmen (optional)", country: "Land / Region",
+      emailUpdates: "E-Mails mit Neuigkeiten und Angeboten erhalten",
+      saveInfo: "Diese Daten für das nächste Mal speichern",
+      pay: "Sicher bezahlen", shipping: "Versand",
+      billing: "Rechnungsadresse", shippingMethod: "Versandmethode",
+      email: "E-Mail",
+    }
+  },
+  PT: {
+    countryCode: "PT", phonePrefix: "+351",
+    labels: {
+      contacts: "Contacto", delivery: "Entrega", payment: "Pagamento",
+      firstName: "Nome", lastName: "Apelido", address: "Morada",
+      address2: "Andar, fração, etc. (opcional)", city: "Cidade",
+      postalCode: "Código postal", province: "Distrito", phone: "Telefone",
+      company: "Empresa (opcional)", country: "País / Região",
+      emailUpdates: "Envie-me emails com novidades e ofertas",
+      saveInfo: "Guardar estes dados para a próxima vez",
+      pay: "Pagar com segurança", shipping: "Envio",
+      billing: "Faturação", shippingMethod: "Método de envio",
+      email: "Email",
+    }
+  },
+  NL: {
+    countryCode: "NL", phonePrefix: "+31",
+    labels: {
+      contacts: "Contact", delivery: "Bezorging", payment: "Betaling",
+      firstName: "Voornaam", lastName: "Achternaam", address: "Adres",
+      address2: "Appartement, verdieping, etc. (optioneel)", city: "Stad",
+      postalCode: "Postcode", province: "Provincie", phone: "Telefoon",
+      company: "Bedrijf (optioneel)", country: "Land / Regio",
+      emailUpdates: "Stuur mij e-mails met nieuws en aanbiedingen",
+      saveInfo: "Deze gegevens opslaan voor de volgende keer",
+      pay: "Veilig betalen", shipping: "Verzending",
+      billing: "Facturering", shippingMethod: "Verzendmethode",
+      email: "E-mail",
+    }
+  },
+}
+
+function getGeoConfig(country: string): GeoConfig {
+  if (GEO_CONFIG[country]) return GEO_CONFIG[country]
+  // Paese non in lista: inglese con countryCode reale dall'IP
+  return {
+    countryCode: country,
+    phonePrefix: "",
+    labels: {
+      contacts: "Contact", delivery: "Delivery", payment: "Payment",
+      firstName: "First name", lastName: "Last name", address: "Address",
+      address2: "Apartment, suite, etc. (optional)", city: "City",
+      postalCode: "Postal code", province: "Region", phone: "Phone",
+      company: "Company (optional)", country: "Country / Region",
+      emailUpdates: "Email me with news and offers",
+      saveInfo: "Save this information for next time",
+      pay: "Pay now securely", shipping: "Shipping",
+      billing: "Billing", shippingMethod: "Shipping method",
+      email: "Email",
+    }
+  }
+}
+// ─────────────────────────────────────────────────────────────────────
+
 function formatMoney(cents: number | undefined, currency: string = "EUR") {
   const value = (cents ?? 0) / 100
   return new Intl.NumberFormat("it-IT", {
@@ -119,6 +252,31 @@ function CheckoutInner({
   const [shippingError, setShippingError] = useState<string | null>(null)
   const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(false)
   const [fbPixelSent, setFbPixelSent] = useState(false)
+
+  // ── GEO STATE ─────────────────────────────────────────────────────────
+  const [geo, setGeo] = useState<GeoConfig>(GEO_CONFIG["IT"])
+
+  useEffect(() => {
+    fetch("/api/geo")
+      .then(r => r.json())
+      .then(data => {
+        const config = getGeoConfig(data.country || "IT")
+        setGeo(config)
+        setCustomer(prev => ({
+          ...prev,
+          countryCode: config.countryCode,
+          phone: config.phonePrefix,
+        }))
+        setBillingAddress(prev => ({
+          ...prev,
+          countryCode: config.countryCode,
+        }))
+      })
+      .catch(() => {})
+  }, [])
+  // ─────────────────────────────────────────────────────────────────────
+
+
 
   const [lastCalculatedHash, setLastCalculatedHash] = useState<string>("")
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -1034,10 +1192,10 @@ function CheckoutInner({
               <form onSubmit={handleSubmit} className="space-y-5">
 
                 <div className="shopify-section">
-                  <h2 className="shopify-section-title">Contatti</h2>
+                  <h2 className="shopify-section-title">{geo.labels.contacts}</h2>
                   
                   <div>
-                    <label className="shopify-label">Email</label>
+                    <label className="shopify-label">{geo.labels.email}</label>
                     <input
                       type="email"
                       name="email"
@@ -1057,17 +1215,17 @@ function CheckoutInner({
                       className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
                     />
                     <label htmlFor="emailUpdates" className="text-xs text-gray-600 leading-relaxed">
-                      Inviami email con notizie e offerte
+                      {geo.labels.emailUpdates}
                     </label>
                   </div>
                 </div>
 
                 <div className="shopify-section">
-                  <h2 className="shopify-section-title">Consegna</h2>
+                  <h2 className="shopify-section-title">{geo.labels.delivery}</h2>
                   
                   <div className="space-y-4">
                     <div>
-                      <label className="shopify-label">Paese / Regione</label>
+                      <label className="shopify-label">{geo.labels.country}</label>
                       <select
                         name="countryCode"
                         value={customer.countryCode}
@@ -1084,7 +1242,7 @@ function CheckoutInner({
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="shopify-label">Nome</label>
+                        <label className="shopify-label">{geo.labels.firstName}</label>
                         <input
                           type="text"
                           name="firstName"
@@ -1103,7 +1261,7 @@ function CheckoutInner({
                       </div>
 
                       <div>
-                        <label className="shopify-label">Cognome</label>
+                        <label className="shopify-label">{geo.labels.lastName}</label>
                         <input
                           type="text"
                           name="lastName"
@@ -1123,7 +1281,7 @@ function CheckoutInner({
                     </div>
 
                     <div>
-                      <label className="shopify-label">Azienda (facoltativo)</label>
+                      <label className="shopify-label">{geo.labels.company}</label>
                       <input
                         type="text"
                         className="shopify-input"
@@ -1133,7 +1291,7 @@ function CheckoutInner({
                     </div>
 
                     <div>
-                      <label className="shopify-label">Indirizzo</label>
+                      <label className="shopify-label">{geo.labels.address}</label>
                       <input
                         ref={addressInputRef}
                         type="text"
@@ -1148,7 +1306,7 @@ function CheckoutInner({
                     </div>
 
                     <div>
-                      <label className="shopify-label">Interno, scala, ecc. (facoltativo)</label>
+                      <label className="shopify-label">{geo.labels.address2}</label>
                       <input
                         type="text"
                         name="address2"
@@ -1162,7 +1320,7 @@ function CheckoutInner({
 
                     <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <label className="shopify-label">CAP</label>
+                        <label className="shopify-label">{geo.labels.postalCode}</label>
                         <input
                           type="text"
                           name="postalCode"
@@ -1176,7 +1334,7 @@ function CheckoutInner({
                       </div>
 
                       <div className="col-span-2">
-                        <label className="shopify-label">Città</label>
+                        <label className="shopify-label">{geo.labels.city}</label>
                         <input
                           type="text"
                           name="city"
@@ -1191,7 +1349,7 @@ function CheckoutInner({
                     </div>
 
                     <div>
-                      <label className="shopify-label">Provincia</label>
+                      <label className="shopify-label">{geo.labels.province}</label>
                       <input
                         type="text"
                         name="province"
@@ -1205,7 +1363,7 @@ function CheckoutInner({
                     </div>
 
                     <div>
-                      <label className="shopify-label">Telefono</label>
+                      <label className="shopify-label">{geo.labels.phone}</label>
                       <input
                         type="tel"
                         name="phone"
@@ -1225,7 +1383,7 @@ function CheckoutInner({
                         className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
                       />
                       <label htmlFor="saveInfo" className="text-xs text-gray-600 leading-relaxed">
-                        Salva questi dati per la prossima volta
+                        {geo.labels.saveInfo}
                       </label>
                     </div>
                   </div>
@@ -1246,11 +1404,11 @@ function CheckoutInner({
 
                 {useDifferentBilling && (
                   <div className="shopify-section">
-                    <h2 className="shopify-section-title">Fatturazione</h2>
+                    <h2 className="shopify-section-title">{geo.labels.billing}</h2>
                     
                     <div className="space-y-4">
                       <div>
-                        <label className="shopify-label">Paese / Regione</label>
+                        <label className="shopify-label">{geo.labels.country}</label>
                         <select
                           value={billingAddress.countryCode}
                           onChange={(e) => setBillingAddress(prev => ({ ...prev, countryCode: e.target.value }))}
@@ -1266,7 +1424,7 @@ function CheckoutInner({
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="shopify-label">Nome</label>
+                          <label className="shopify-label">{geo.labels.firstName}</label>
                           <input
                             type="text"
                             value={billingFirstName}
@@ -1283,7 +1441,7 @@ function CheckoutInner({
                         </div>
 
                         <div>
-                          <label className="shopify-label">Cognome</label>
+                          <label className="shopify-label">{geo.labels.lastName}</label>
                           <input
                             type="text"
                             value={billingLastName}
@@ -1301,7 +1459,7 @@ function CheckoutInner({
                       </div>
 
                       <div>
-                        <label className="shopify-label">Indirizzo</label>
+                        <label className="shopify-label">{geo.labels.address}</label>
                         <input
                           type="text"
                           value={billingAddress.address1}
@@ -1313,7 +1471,7 @@ function CheckoutInner({
                       </div>
 
                       <div>
-                        <label className="shopify-label">Interno, scala, ecc. (facoltativo)</label>
+                        <label className="shopify-label">{geo.labels.address2}</label>
                         <input
                           type="text"
                           value={billingAddress.address2}
@@ -1325,7 +1483,7 @@ function CheckoutInner({
 
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="shopify-label">CAP</label>
+                          <label className="shopify-label">{geo.labels.postalCode}</label>
                           <input
                             type="text"
                             value={billingAddress.postalCode}
@@ -1337,7 +1495,7 @@ function CheckoutInner({
                         </div>
 
                         <div className="col-span-2">
-                          <label className="shopify-label">Città</label>
+                          <label className="shopify-label">{geo.labels.city}</label>
                           <input
                             type="text"
                             value={billingAddress.city}
@@ -1350,7 +1508,7 @@ function CheckoutInner({
                       </div>
 
                       <div>
-                        <label className="shopify-label">Provincia</label>
+                        <label className="shopify-label">{geo.labels.province}</label>
                         <input
                           type="text"
                           value={billingAddress.province}
@@ -1367,7 +1525,7 @@ function CheckoutInner({
                 {isFormValid() && (
                   <>
                     <div className="shopify-section">
-                      <h2 className="shopify-section-title">Metodo di spedizione</h2>
+                      <h2 className="shopify-section-title">{geo.labels.shippingMethod}</h2>
                       <div className="border border-gray-300 rounded-xl p-4 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
                         <div>
                           <p className="text-sm font-semibold text-gray-900">Spedizione BRT Express</p>
@@ -1420,7 +1578,7 @@ function CheckoutInner({
                 )}
 
                 <div className="shopify-section">
-                  <h2 className="shopify-section-title">Pagamento</h2>
+                  <h2 className="shopify-section-title">{geo.labels.payment}</h2>
                   
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
@@ -1560,7 +1718,7 @@ function CheckoutInner({
                       <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                       </svg>
-                      Paga in sicurezza
+                      {geo.labels.pay}
                     </span>
                   )}
                 </button>
