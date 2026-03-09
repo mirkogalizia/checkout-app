@@ -86,9 +86,9 @@ const GEO_CONFIG: Record<string, GeoConfig> = {
       address2: "Interno, scala, ecc. (facoltativo)", city: "Città",
       postalCode: "CAP", province: "Provincia", phone: "Telefono",
       company: "Azienda (facoltativo)", country: "Paese / Regione",
-      emailUpdates: "{geo.labels.emailUpdates}",
-      saveInfo: "{geo.labels.saveInfo}",
-      pay: "{geo.labels.pay}", shipping: "Spedizione",
+      emailUpdates: "Inviami email con notizie e offerte",
+      saveInfo: "Salva questi dati per la prossima volta",
+      pay: "Paga in sicurezza", shipping: "Spedizione",
       billing: "Fatturazione", shippingMethod: "Metodo di spedizione",
       email: "Email",
     }
@@ -2079,4 +2079,3 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
-
