@@ -43,9 +43,13 @@ type OrderData = {
   }
 }
 
-
-
-
+// ── AGGIUNTO: tipo globale per fbq ───────────────────────────────────
+declare global {
+  interface Window {
+    fbq?: (...args: any[]) => void
+  }
+}
+// ─────────────────────────────────────────────────────────────────────
 
 function ThankYouContent() {
   const searchParams = useSearchParams()
@@ -54,7 +58,6 @@ function ThankYouContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
-
 
   useEffect(() => {
     async function load() {
@@ -70,20 +73,16 @@ function ThankYouContent() {
         const finalTotal = subtotal - discount + shipping
         setOrderData({ shopifyOrderNumber: data.shopifyOrderNumber, shopifyOrderId: data.shopifyOrderId, email: data.customer?.email, subtotalCents: subtotal, shippingCents: shipping, discountCents: discount, totalCents: finalTotal, currency: data.currency || "EUR", shopDomain: data.shopDomain, paymentIntentId: data.paymentIntentId, rawCart: data.rawCart, items: data.items || [], customer: data.customer })
         setTimeout(() => setVisible(true), 50)
-        if (typeof window !== "undefined" && (window as any).fbq) { try { (window as any).fbq("track", "PageView") } catch {} }
+        if (typeof window !== "undefined" && window.fbq) { try { window.fbq("track", "PageView") } catch {} }
 
-        // ── GOOGLE ADS CONVERSION ─────────────────────────────────────────
-        // FIX 1: ID corretto AW-17960095093 (era AW-17925038279)
-        // FIX 2: value reale dell'ordine in float (era 1.0 fisso)
-        // FIX 3: transaction_id per deduplicazione (era stringa vuota '')
         const sendGA = () => {
           if (!(window as any).gtag) return
           const a = data.rawCart?.attributes || {}
           ;(window as any).gtag("event", "conversion", {
-            send_to:        "AW-17960095093/dvWzCKSd8fsbEPWahfRC", // ✅ ID corretto
-            value:          parseFloat((finalTotal / 100).toFixed(2)), // ✅ float reale, non 1.0
+            send_to:        "AW-17960095093/dvWzCKSd8fsbEPWahfRC",
+            value:          parseFloat((finalTotal / 100).toFixed(2)),
             currency:       (data.currency || "EUR").toUpperCase(),
-            transaction_id: String(data.shopifyOrderNumber || data.shopifyOrderId || sessionId), // ✅ deduplicazione
+            transaction_id: String(data.shopifyOrderNumber || data.shopifyOrderId || sessionId),
             utm_source:     a._wt_last_source   || "",
             utm_medium:     a._wt_last_medium   || "",
             utm_campaign:   a._wt_last_campaign || "",
@@ -91,7 +90,6 @@ function ThankYouContent() {
         }
         if ((window as any).gtag) sendGA()
         else { const t = setInterval(() => { if ((window as any).gtag) { clearInterval(t); sendGA() } }, 100); setTimeout(() => clearInterval(t), 5000) }
-        // ─────────────────────────────────────────────────────────────────
 
         const a = data.rawCart?.attributes||{}
         fetch("/api/analytics/purchase",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ orderId:data.shopifyOrderId||sessionId, orderNumber:data.shopifyOrderNumber||null, sessionId, timestamp:new Date().toISOString(), value:finalTotal/100, valueCents:finalTotal, subtotalCents:subtotal, shippingCents:shipping, discountCents:discount, currency:data.currency||"EUR", itemCount:(data.items||[]).length, utm:{ source:a._wt_last_source||null, medium:a._wt_last_medium||null, campaign:a._wt_last_campaign||null, content:a._wt_last_content||null, fbclid:a._wt_last_fbclid||null, gclid:a._wt_last_gclid||null, campaign_id:a._wt_last_campaign_id||null, adset_id:a._wt_last_adset_id||null, adset_name:a._wt_last_adset_name||null, ad_id:a._wt_last_ad_id||null, ad_name:a._wt_last_ad_name||null }, utm_first:{ source:a._wt_first_source||null, medium:a._wt_first_medium||null, campaign:a._wt_first_campaign||null, referrer:a._wt_first_referrer||null, landing:a._wt_first_landing||null, fbclid:a._wt_first_fbclid||null }, customer:{ email:data.customer?.email||null, fullName:data.customer?.fullName||null, city:data.customer?.city||null, postalCode:data.customer?.postalCode||null, countryCode:data.customer?.countryCode||null }, items:(data.items||[]).map((i:any)=>({ id:i.id||i.variant_id, title:i.title, quantity:i.quantity, priceCents:i.priceCents||0, linePriceCents:i.linePriceCents||0 })), shopDomain:data.shopDomain||"notforresale.it" }) }).catch(()=>{})
@@ -102,9 +100,63 @@ function ThankYouContent() {
     load()
   }, [sessionId])
 
+  // ── AGGIUNTO: Meta Pixel Purchase per deduplicazione con CAPI ────────
+  useEffect(() => {
+    if (!orderData?.shopifyOrderNumber) return
+
+    function fireMetaPixel() {
+      if (!window.fbq) return
+
+      const orderNumber = orderData!.shopifyOrderNumber!
+      const eventId = `purchase_${orderNumber}` // identico al webhook CAPI
+
+      const value = parseFloat(((orderData!.totalCents || 0) / 100).toFixed(2))
+      const currency = (orderData!.currency || "EUR").toUpperCase()
+
+      const contents = (orderData!.items || []).map((item) => ({
+        id: String(item.variant_id || item.id || ""),
+        quantity: item.quantity || 1,
+        item_price: parseFloat(((item.priceCents || 0) / 100).toFixed(2)),
+      }))
+
+      const numItems = (orderData!.items || []).reduce(
+        (sum, item) => sum + (item.quantity || 1),
+        0
+      )
+
+      window.fbq(
+        "track",
+        "Purchase",
+        {
+          value,
+          currency,
+          content_type: "product",
+          content_ids: contents.map((c) => c.id),
+          contents,
+          num_items: numItems,
+          order_id: orderNumber,
+        },
+        { eventID: eventId }
+      )
+
+      console.log("[thank-you] Meta Pixel Purchase fired | eventID:", eventId, "| value:", value, currency)
+    }
+
+    // fbq potrebbe non essere ancora caricato, riprova ogni 200ms per max 5s
+    if (window.fbq) {
+      fireMetaPixel()
+    } else {
+      const interval = setInterval(() => {
+        if (!window.fbq) return
+        clearInterval(interval)
+        fireMetaPixel()
+      }, 200)
+      setTimeout(() => clearInterval(interval), 5000)
+    }
+  }, [orderData?.shopifyOrderNumber]) // si attiva una sola volta quando arriva l'orderNumber
+  // ─────────────────────────────────────────────────────────────────────
+
   const fmt = (cents:number|undefined) => new Intl.NumberFormat("it-IT",{ style:"currency", currency:orderData?.currency||"EUR", minimumFractionDigits:2 }).format((cents??0)/100)
-
-
 
   if (loading) return (
     <div style={{ minHeight:"100vh", background:"#000", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
@@ -132,7 +184,6 @@ function ThankYouContent() {
     <>
       <Script id="facebook-pixel" strategy="afterInteractive">{`!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','${process.env.NEXT_PUBLIC_FB_PIXEL_ID}');`}</Script>
 
-      {/* ✅ FIX: ID corretto AW-17960095093 (era AW-17925038279 in entrambe le righe) */}
       <Script src="https://www.googletagmanager.com/gtag/js?id=AW-17960095093" strategy="afterInteractive" />
       <Script id="google-ads-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html:`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-17960095093');` }} />
 
@@ -145,12 +196,10 @@ function ThankYouContent() {
 
       <div style={{ minHeight:"100vh", background:"#f5f5f7", fontFamily:"-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif" }}>
 
-        {/* HEADER */}
         <div style={{ background:"#000", padding:"18px 24px", textAlign:"center" }}>
           <img src="https://cdn.shopify.com/s/files/1/0608/1806/3572/files/logo_nfr_bianco.png?v=1719300466" alt="Not For Resale" style={{ height:34, display:"inline-block" }} />
         </div>
 
-        {/* HERO */}
         <div style={{ position:"relative", overflow:"hidden", maxHeight:260 }}>
           <img src="https://img.bayengage.com/b5cc27ebe82e/studio/41162/Kraft-Bubble-Mailer-Mockup-Set-by-Creatsy-8-.jpg" alt="" style={{ width:"100%", display:"block", objectFit:"cover", maxHeight:260, filter:"brightness(0.8)" }} />
           <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom,rgba(0,0,0,0) 30%,rgba(0,0,0,0.72) 100%)", display:"flex", alignItems:"flex-end", padding:"24px 28px" }}>
@@ -168,7 +217,6 @@ function ThankYouContent() {
 
         <div style={{ maxWidth:640, margin:"0 auto", padding:"0 16px 60px" }}>
 
-          {/* GREETING */}
           <div className={visible?"ty-fade ty-1":""} style={{ background:"#fff", borderRadius:"0 0 20px 20px", padding:"28px 24px 24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
             <h1 style={{ fontSize:22, fontWeight:700, color:"#1d1d1f", marginBottom:10, fontFamily:"Georgia,'Times New Roman',serif" }}>
               Ciao {firstName}! 👋
@@ -184,7 +232,6 @@ function ThankYouContent() {
             )}
           </div>
 
-          {/* PRODOTTI */}
           {orderData.items && orderData.items.length > 0 && (
             <div className={visible?"ty-fade ty-3":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, marginTop:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
               <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:18 }}>Il tuo ordine</h2>
@@ -224,7 +271,6 @@ function ThankYouContent() {
             </div>
           )}
 
-          {/* INDIRIZZO */}
           {customer?.address1 && (
             <div className={visible?"ty-fade ty-4":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
               <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:14 }}>📦 Spedizione a</h2>
@@ -237,7 +283,6 @@ function ThankYouContent() {
             </div>
           )}
 
-          {/* PROSSIMI PASSI */}
           <div className={visible?"ty-fade ty-4":""} style={{ background:"#fff", borderRadius:20, padding:"24px", marginTop:12, marginBottom:12, boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
             <h2 style={{ fontSize:12, fontWeight:700, color:"#86868b", letterSpacing:".12em", textTransform:"uppercase", marginBottom:18 }}>Cosa succede ora</h2>
             {[
@@ -255,14 +300,12 @@ function ThankYouContent() {
             ))}
           </div>
 
-          {/* CTA PRINCIPALE */}
           <div className={visible?"ty-fade ty-5":""} style={{ marginBottom:8 }}>
             <a href={`https://${orderData.shopDomain||"notforresale.it"}`} style={{ display:"block", padding:"16px", background:"#000", color:"#fff", textAlign:"center", fontWeight:700, fontSize:15, borderRadius:16, textDecoration:"none", boxSizing:"border-box", boxShadow:"0 4px 16px rgba(0,0,0,0.15)" }}>
               Continua a fare shopping →
             </a>
           </div>
 
-          {/* FOOTER */}
           <div className={visible?"ty-fade ty-5":""} style={{ textAlign:"center", padding:"20px 0 8px" }}>
             <p style={{ fontSize:13, color:"#86868b", marginBottom:12 }}>
               Hai bisogno di aiuto?{" "}
@@ -291,3 +334,4 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
+
