@@ -2035,26 +2035,24 @@ function CheckoutPageContent() {
       </div>
     )
   }
-
-  const options = {
-    mode: 'payment' as const,
-    amount: 1000,
-    currency: (cart.currency || 'eur').toLowerCase(),
-    paymentMethodTypes: ['card'],
-    appearance: {
-      theme: "stripe" as const,
-      variables: {
-        colorPrimary: "#2C6ECB",
-        colorBackground: "#ffffff",
-        colorText: "#333333",
-        colorDanger: "#df1b41",
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        spacingUnit: '4px',
-        borderRadius: "10px",
-        fontSizeBase: '16px',
-      },
+const options = {
+  mode: 'payment' as const,
+  amount: 1000,
+  currency: (cart.currency || 'eur').toLowerCase(),
+  appearance: {
+    theme: "stripe" as const,
+    variables: {
+      colorPrimary: "#2C6ECB",
+      colorBackground: "#ffffff",
+      colorText: "#333333",
+      colorDanger: "#df1b41",
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      spacingUnit: '4px',
+      borderRadius: "10px",
+      fontSizeBase: '16px',
     },
-  }
+  },
+}
 
   return (
     <Elements stripe={stripePromise} options={options}>

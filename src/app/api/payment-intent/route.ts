@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
       description,
       ...(email && { receipt_email: email }),
       statement_descriptor_suffix: statementDescriptorSuffix,
-      payment_method_types: ["card"],
+payment_method_types: ["card", "klarna"],
       payment_method_options: {
         card: {
           request_three_d_secure: "automatic",
