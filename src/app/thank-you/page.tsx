@@ -78,7 +78,10 @@ function ThankYouContent() {
         const sendGA = () => {
           if (!(window as any).gtag) return
           const a = data.rawCart?.attributes || {}
-          ;(window as any).gtag("event", "conversion", {
+          // Estrai gclid e gbraid — necessari per attribuzione corretta in Google Ads
+          const gclid  = a._wt_last_gclid  || a._wt_first_gclid  || undefined
+          const gbraid = a._wt_last_gbraid || a._wt_first_gbraid || undefined
+          const payload: Record<string, any> = {
             send_to:        "AW-17960095093/dvWzCKSd8fsbEPWahfRC",
             value:          parseFloat((finalTotal / 100).toFixed(2)),
             currency:       (data.currency || "EUR").toUpperCase(),
@@ -86,7 +89,11 @@ function ThankYouContent() {
             utm_source:     a._wt_last_source   || "",
             utm_medium:     a._wt_last_medium   || "",
             utm_campaign:   a._wt_last_campaign || "",
-          })
+          }
+          // Aggiungi gclid/gbraid solo se presenti — Google Ads li usa per attribuire il clic
+          if (gclid)  payload.gclid  = gclid
+          if (gbraid) payload.gbraid = gbraid
+          ;(window as any).gtag("event", "conversion", payload)
         }
         if ((window as any).gtag) sendGA()
         else { const t = setInterval(() => { if ((window as any).gtag) { clearInterval(t); sendGA() } }, 100); setTimeout(() => clearInterval(t), 5000) }
@@ -334,4 +341,3 @@ export default function ThankYouPage() {
     </Suspense>
   )
 }
-
