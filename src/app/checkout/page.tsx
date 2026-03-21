@@ -1214,15 +1214,6 @@ function CheckoutInner({
                       maxRows: 3,
                       overflow: "auto",
                     },
-                    // ✅ fields.billingDetails: "auto" → chiede nome/email/telefono nel wallet sheet
-                    fields: {
-                      billingDetails: {
-                        name: "auto",
-                        email: "auto",
-                        phone: "auto",
-                        address: "auto",
-                      },
-                    },
                   }}
                 />
               </div>
