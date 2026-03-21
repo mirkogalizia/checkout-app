@@ -89,8 +89,26 @@ export async function POST(req: NextRequest) {
       console.log(`[stripe-webhook] 📦 Items: ${sessionData.items?.length || 0}`)
       console.log(`[stripe-webhook] 👤 Cliente: ${sessionData.customer?.email || "N/A"}`)
 
-      if (sessionData.shopifyOrderId) {
-        console.log(`[stripe-webhook] ℹ️ Ordine già esistente: #${sessionData.shopifyOrderNumber}`)
+      // ── LOCK TRANSAZIONALE ────────────────────────────────────────────
+      // Previene doppio processing quando Stripe manda il webhook più volte
+      // in rapida successione (retry policy). Il lock viene acquisito con una
+      // transazione atomica su Firebase: se webhookProcessing è già true,
+      // un secondo webhook concorrente lo trova e si ferma.
+      const sessionRef = db.collection(COLLECTION).doc(sessionId)
+
+      let alreadyLocked = false
+      await db.runTransaction(async (tx) => {
+        const doc = await tx.get(sessionRef)
+        const d = doc.data() || {}
+        if (d.shopifyOrderId || d.webhookProcessing || d.shopifyOrderFailed) {
+          alreadyLocked = true
+          return
+        }
+        tx.update(sessionRef, { webhookProcessing: true, webhookProcessingAt: new Date().toISOString() })
+      })
+
+      if (alreadyLocked) {
+        console.log(`[stripe-webhook] ℹ️ Già processato o in corso per sessione ${sessionId}`)
         return NextResponse.json({ received: true, alreadyProcessed: true }, { status: 200 })
       }
 
@@ -104,92 +122,102 @@ export async function POST(req: NextRequest) {
         stripeAccountLabel: matchedAccount.label,
       })
 
+      // ── AGGIORNA FIREBASE ─────────────────────────────────────────────
+      // Salva sempre, anche se Shopify fallisce — il pagamento è avvenuto
+      const firebaseUpdate: Record<string, any> = {
+        webhookProcessing:     false,
+        paymentStatus:         "paid",
+        webhookProcessedAt:    new Date().toISOString(),
+        stripeAccountUsed:     matchedAccount.label,
+        stripePaymentMethodId: paymentIntent.payment_method ?? null,
+        stripeCustomerId: typeof paymentIntent.customer === "string"
+          ? paymentIntent.customer
+          : null,
+      }
+
       if (result.orderId) {
         console.log(`[stripe-webhook] 🎉 Ordine creato: #${result.orderNumber} (ID: ${result.orderId})`)
-
-        await db.collection(COLLECTION).doc(sessionId).update({
-          shopifyOrderId:       result.orderId,
-          shopifyOrderNumber:   result.orderNumber,
-          orderCreatedAt:       new Date().toISOString(),
-          paymentStatus:        "paid",
-          webhookProcessedAt:   new Date().toISOString(),
-          stripeAccountUsed:    matchedAccount.label,
-          // ← AGGIUNTE PER UPSELL ONE-CLICK
-          stripePaymentMethodId: paymentIntent.payment_method ?? null,
-          stripeCustomerId: typeof paymentIntent.customer === "string"
-            ? paymentIntent.customer
-            : null,
-        })
-
-        console.log("[stripe-webhook] ✅ Dati salvati in Firebase")
-        console.log(`[stripe-webhook] 💳 PaymentMethod: ${paymentIntent.payment_method}`)
-        console.log(`[stripe-webhook] 👤 Customer: ${paymentIntent.customer}`)
-
-        // ✅ SALVA STATISTICHE GIORNALIERE
-        const today = new Date().toISOString().split("T")[0]
-        const statsRef = db.collection("dailyStats").doc(today)
-
-        await db.runTransaction(async (transaction) => {
-          const statsDoc = await transaction.get(statsRef)
-          if (!statsDoc.exists) {
-            transaction.set(statsRef, {
-              date: today,
-              accounts: {
-                [matchedAccount.label]: {
-                  totalCents:       paymentIntent.amount,
-                  transactionCount: 1,
-                },
-              },
-              totalCents:        paymentIntent.amount,
-              totalTransactions: 1,
-            })
-          } else {
-            const data = statsDoc.data()!
-            const accountStats = data.accounts?.[matchedAccount.label] || {
-              totalCents: 0,
-              transactionCount: 0,
-            }
-            transaction.update(statsRef, {
-              [`accounts.${matchedAccount.label}.totalCents`]:       accountStats.totalCents + paymentIntent.amount,
-              [`accounts.${matchedAccount.label}.transactionCount`]: accountStats.transactionCount + 1,
-              totalCents:        (data.totalCents || 0) + paymentIntent.amount,
-              totalTransactions: (data.totalTransactions || 0) + 1,
-            })
-          }
-        })
-
-        console.log("[stripe-webhook] 💾 Statistiche giornaliere aggiornate")
-
-        // ✅ INVIO META CONVERSIONS API
-        await sendMetaPurchaseEvent({
-          paymentIntent,
-          sessionData,
-          sessionId,
-          orderId:     result.orderId,
-          orderNumber: result.orderNumber,
-          req,
-        })
-
-        // Svuota carrello
-        if (sessionData.rawCart?.id) {
-          console.log(`[stripe-webhook] 🧹 Svuotamento carrello...`)
-          await clearShopifyCart(sessionData.rawCart.id, config)
-        }
-
-        console.log("[stripe-webhook] ════════════════════════════════════")
-        console.log("[stripe-webhook] ✅ COMPLETATO CON SUCCESSO")
-        console.log("[stripe-webhook] ════════════════════════════════════")
-
-        return NextResponse.json({
-          received:    true,
-          orderId:     result.orderId,
-          orderNumber: result.orderNumber,
-        }, { status: 200 })
-
+        firebaseUpdate.shopifyOrderId     = result.orderId
+        firebaseUpdate.shopifyOrderNumber = result.orderNumber
+        firebaseUpdate.orderCreatedAt     = new Date().toISOString()
       } else {
-        console.error("[stripe-webhook] ❌ Creazione ordine FALLITA")
-        return NextResponse.json({ received: true, error: "order_creation_failed" }, { status: 200 })
+        console.error("[stripe-webhook] ❌ Creazione ordine Shopify FALLITA — pagamento registrato comunque")
+        firebaseUpdate.shopifyOrderError  = "creation_failed"
+        // Blocca anche eventuali retry manuali dalla dashboard Stripe:
+        // il lock transazionale controlla questo flag oltre a shopifyOrderId
+        firebaseUpdate.shopifyOrderFailed = true
       }
+
+      await db.collection(COLLECTION).doc(sessionId).update(firebaseUpdate)
+      console.log("[stripe-webhook] ✅ Dati salvati in Firebase")
+      console.log(`[stripe-webhook] 💳 PaymentMethod: ${paymentIntent.payment_method}`)
+      console.log(`[stripe-webhook] 👤 Customer: ${paymentIntent.customer}`)
+
+      // ── STATISTICHE GIORNALIERE ───────────────────────────────────────
+      const today = new Date().toISOString().split("T")[0]
+      const statsRef = db.collection("dailyStats").doc(today)
+
+      await db.runTransaction(async (transaction) => {
+        const statsDoc = await transaction.get(statsRef)
+        if (!statsDoc.exists) {
+          transaction.set(statsRef, {
+            date: today,
+            accounts: {
+              [matchedAccount.label]: {
+                totalCents:       paymentIntent.amount,
+                transactionCount: 1,
+              },
+            },
+            totalCents:        paymentIntent.amount,
+            totalTransactions: 1,
+          })
+        } else {
+          const data = statsDoc.data()!
+          const accountStats = data.accounts?.[matchedAccount.label] || {
+            totalCents: 0,
+            transactionCount: 0,
+          }
+          transaction.update(statsRef, {
+            [`accounts.${matchedAccount.label}.totalCents`]:       accountStats.totalCents + paymentIntent.amount,
+            [`accounts.${matchedAccount.label}.transactionCount`]: accountStats.transactionCount + 1,
+            totalCents:        (data.totalCents || 0) + paymentIntent.amount,
+            totalTransactions: (data.totalTransactions || 0) + 1,
+          })
+        }
+      })
+
+      console.log("[stripe-webhook] 💾 Statistiche giornaliere aggiornate")
+
+      // ── META CONVERSIONS API ──────────────────────────────────────────
+      // Spara SEMPRE, indipendentemente dal risultato di Shopify.
+      // Se l'ordine è stato creato: eventID = purchase_{orderNumber}
+      //   → deduplica correttamente col pixel browser della thank-you page
+      // Se Shopify ha fallito: eventID = purchase_pi_{paymentIntent.id}
+      //   → stabile e unico, non deduplica col browser ma almeno arriva a Meta
+      await sendMetaPurchaseEvent({
+        paymentIntent,
+        sessionData,
+        sessionId,
+        orderId:     result.orderId,
+        orderNumber: result.orderNumber,
+        req,
+      })
+
+      // ── SVUOTA CARRELLO ───────────────────────────────────────────────
+      if (sessionData.rawCart?.id) {
+        console.log(`[stripe-webhook] 🧹 Svuotamento carrello...`)
+        await clearShopifyCart(sessionData.rawCart.id, config)
+      }
+
+      console.log("[stripe-webhook] ════════════════════════════════════")
+      console.log("[stripe-webhook] ✅ COMPLETATO CON SUCCESSO")
+      console.log("[stripe-webhook] ════════════════════════════════════")
+
+      return NextResponse.json({
+        received:    true,
+        orderId:     result.orderId     ?? null,
+        orderNumber: result.orderNumber ?? null,
+      }, { status: 200 })
     }
 
     console.log(`[stripe-webhook] ℹ️ Evento ${event.type} ignorato`)
@@ -199,6 +227,23 @@ export async function POST(req: NextRequest) {
     console.error("[stripe-webhook] 💥 ERRORE CRITICO:")
     console.error("[stripe-webhook] Messaggio:", error.message)
     console.error("[stripe-webhook] Stack:", error.stack)
+
+    // Rilascia il lock se presente, altrimenti la sessione rimane bloccata
+    // per sempre e i retry non possono più processarla
+    try {
+      const sessionId = (event?.data?.object as any)?.metadata?.session_id
+      if (sessionId) {
+        await db.collection(COLLECTION).doc(sessionId).update({
+          webhookProcessing: false,
+          webhookLastError:  error?.message || "unknown",
+          webhookErrorAt:    new Date().toISOString(),
+        })
+        console.error("[stripe-webhook] 🔓 Lock rilasciato dopo errore critico")
+      }
+    } catch (releaseErr: any) {
+      console.error("[stripe-webhook] ⚠️ Impossibile rilasciare lock:", releaseErr.message)
+    }
+
     return NextResponse.json({ error: error?.message }, { status: 500 })
   }
 }
