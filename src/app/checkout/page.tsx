@@ -1214,16 +1214,14 @@ function CheckoutInner({
                       maxRows: 3,
                       overflow: "auto",
                     },
-                    // Apple Pay mostra automaticamente l'indirizzo salvato nel wallet.
-                    // shippingAddressCollection fa sì che l'utente possa sceglierlo/modificarlo.
-                    // emailRequired e phoneNumberCollection chiedono i campi contatto.
-                    // L'utente NON compila nulla nel form — tutto viene dal wallet.
-                    shippingAddressCollection: {
-                      allowedCountries: ["IT", "FR", "DE", "ES", "PT", "NL", "AT", "BE", "CH"],
-                    },
-                    emailRequired: true,
-                    phoneNumberCollection: {
-                      enabled: true,
+                    // ✅ fields.billingDetails: "auto" → chiede nome/email/telefono nel wallet sheet
+                    fields: {
+                      billingDetails: {
+                        name: "auto",
+                        email: "auto",
+                        phone: "auto",
+                        address: "auto",
+                      },
                     },
                   }}
                 />
