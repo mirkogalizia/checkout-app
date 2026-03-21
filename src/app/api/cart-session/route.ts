@@ -143,7 +143,11 @@ export async function POST(req: NextRequest) {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalCents,
       currency: currency.toLowerCase(),
-      payment_method_types: ["card"],
+      // ✅ automatic_payment_methods abilita Apple Pay, Google Pay e carta
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: "never",
+      },
       metadata: {
         sessionId,
       },
