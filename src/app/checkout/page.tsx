@@ -421,17 +421,8 @@ function OrderSummary({
           const isDiscounted = discountAmount > 0
 
           return (
-            <div key={idx} className="flex gap-3 relative">
-              {isFullyFree && (
-                <div className="absolute -top-2.5 left-14 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  GRATIS 🎁
-                </div>
-              )}
-              {!isFullyFree && isDiscounted && (
-                <div className="absolute -top-2 left-14 z-10 bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  SCONTO
-                </div>
-              )}
+            <div key={idx} className="flex gap-3">
+              {/* Immagine con badge quantità */}
               {item.image && (
                 <div className="relative flex-shrink-0">
                   <img
@@ -444,28 +435,38 @@ function OrderSummary({
                   </span>
                 </div>
               )}
+
+              {/* Info prodotto */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 leading-tight">{item.title}</p>
                 {item.variantTitle && (
                   <p className="text-xs text-gray-400 mt-0.5">{item.variantTitle}</p>
                 )}
+
+                {/* Badge sconto inline, sotto la variante */}
+                {isFullyFree && (
+                  <span className="inline-flex items-center gap-1 mt-1 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    🎁 GRATIS
+                  </span>
+                )}
+                {!isFullyFree && isDiscounted && (
+                  <span className="inline-flex items-center gap-1 mt-1 bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    -{formatMoney(discountAmount, currency)}
+                  </span>
+                )}
+
+                {/* Prezzo barrato */}
                 {isDiscounted && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <span className="text-xs line-through text-gray-300">{formatMoney(expectedTotal, currency)}</span>
-                    {isFullyFree
-                      ? <span className="text-xs font-bold text-emerald-600">GRATIS</span>
-                      : <span className="text-xs font-semibold text-red-500">-{formatMoney(discountAmount, currency)}</span>
-                    }
-                  </div>
+                  <p className="text-xs line-through text-gray-300 mt-0.5">{formatMoney(expectedTotal, currency)}</p>
                 )}
               </div>
-              <div className="flex-shrink-0 text-right">
+
+              {/* Prezzo finale */}
+              <div className="flex-shrink-0 text-right self-start pt-0.5">
                 {isFullyFree ? (
                   <span className="text-sm font-bold text-emerald-600">€0,00</span>
-                ) : isDiscounted ? (
-                  <span className="text-sm font-bold text-gray-900">{formatMoney(currentPrice, currency)}</span>
                 ) : (
-                  <span className="text-sm font-semibold text-gray-900">{formatMoney(currentPrice, currency)}</span>
+                  <span className="text-sm font-bold text-gray-900">{formatMoney(currentPrice, currency)}</span>
                 )}
               </div>
             </div>
@@ -1822,6 +1823,42 @@ function CheckoutPageContent() {
           border: "1px solid #e5e7eb",
           boxShadow: "none",
           padding: "12px 14px",
+        },
+        ".Input:focus": {
+          border: "1px solid #1d1d1f",
+          boxShadow: "0 0 0 2px rgba(29, 29, 31, 0.08)",
+        },
+        ".Label": {
+          fontSize: "12px",
+          fontWeight: "500",
+          color: "#6b7280",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        },
+      },
+    },
+  }
+
+  return (
+    <Elements stripe={stripePromise} options={elementsOptions}>
+      <CheckoutInner cart={cart} sessionId={sessionId} />
+    </Elements>
+  )
+}
+
+export default function CheckoutPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="w-10 h-10 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <CheckoutPageContent />
+    </Suspense>
+  )
+}
         },
         ".Input:focus": {
           border: "1px solid #1d1d1f",
