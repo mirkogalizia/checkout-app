@@ -251,7 +251,7 @@ function CheckoutInner({
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [shippingError, setShippingError] = useState<string | null>(null)
   const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(false)
-  const [fbPixelSent, setFbPixelSent] = useState(false)
+  // fbPixelSent rimosso: guard sostituito da sessionStorage + useRef
 
   // ── GEO STATE ─────────────────────────────────────────────────────────
   const [geo, setGeo] = useState<GeoConfig>(GEO_CONFIG["IT"])
@@ -314,64 +314,54 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // ✅ FACEBOOK PIXEL - INITIATE CHECKOUT (TRACKING CHECKOUT ABBANDONATI)
+  // FACEBOOK PIXEL - INITIATE CHECKOUT
+  // Guard sessionStorage: evita double-fire su refresh o back-button.
+  // eventID formato: "initiate_checkout_{sessionId}" — stabile e unico per sessione.
+  // Non mandiamo UTM nel payload browser: Meta li ignora, vanno solo via CAPI.
+  const pixelInitRef = useRef(false)
+
   useEffect(() => {
-  if (fbPixelSent) return
+    if (!sessionId || cart.items.length === 0) return
 
-  const sendFBPixel = async () => {
-    if (typeof window !== 'undefined' && (window as any).fbq && cart.items.length > 0) {
-      console.log('[Checkout] 📊 Invio Facebook Pixel InitiateCheckout...')
-      
-      // ✅ ESTRAI UTM DA RAWCART
-      const attrs = cart.rawCart?.attributes || {}
-      const utm = {
-        source: attrs._wt_last_source,
-        medium: attrs._wt_last_medium,
-        campaign: attrs._wt_last_campaign,
-        content: attrs._wt_last_content,
-        term: attrs._wt_last_term,
-      }
+    // Guard A: StrictMode double mount
+    if (pixelInitRef.current) return
+    pixelInitRef.current = true
 
-      console.log('[Checkout] 📍 UTM estratti:', utm)
-      
-      const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
-      const eventId = cart.paymentIntentId || sessionId
-      
+    // Guard B: refresh / back button
+    const storageKey = `meta_pixel_fired_initiate_${sessionId}`
+    if (sessionStorage.getItem(storageKey)) {
+      console.log('[Checkout] InitiateCheckout già sparato per', sessionId, '— skip')
+      return
+    }
+
+    const eventId = `initiate_checkout_${sessionId}`
+    const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
+    const numItems = cart.items.reduce((sum, item) => sum + item.quantity, 0)
+
+    const fire = () => {
+      if (!(window as any).fbq) return
+      sessionStorage.setItem(storageKey, '1')
       ;(window as any).fbq('track', 'InitiateCheckout', {
         value: totalToPayCents / 100,
         currency: currency,
         content_ids: contentIds,
         content_type: 'product',
-        num_items: cart.items.reduce((sum, item) => sum + item.quantity, 0),
-        ...utm  // ✅ AGGIUNGI UTM!
+        num_items: numItems,
       }, { eventID: eventId })
-
-      console.log('[Checkout] ✅ Facebook Pixel InitiateCheckout inviato')
-      console.log('[Checkout] Event ID:', eventId)
-      console.log('[Checkout] Value:', totalToPayCents / 100, currency)
-      console.log('[Checkout] 📍 UTM Campaign:', utm.campaign || 'N/A')  // ✅ NUOVO!
-      console.log('[Checkout] 📍 UTM Source:', utm.source || 'N/A')      // ✅ NUOVO!
-      
-      setFbPixelSent(true)
+      console.log('[Checkout] ✅ InitiateCheckout fired | eventID:', eventId, '| value:', totalToPayCents / 100, currency)
     }
-  }
 
-  // Prova subito se fbq è già disponibile
-  if ((window as any).fbq) {
-    sendFBPixel()
-  } else {
-    // Aspetta che fbq sia pronto
-    const checkFbq = setInterval(() => {
-      if ((window as any).fbq) {
-        clearInterval(checkFbq)
-        sendFBPixel()
-      }
-    }, 100)
-
-    // Timeout dopo 5 secondi
-    setTimeout(() => clearInterval(checkFbq), 5000)
-  }
-}, [fbPixelSent, cart, totalToPayCents, currency, sessionId])
+    if ((window as any).fbq) {
+      fire()
+    } else {
+      const t = setInterval(() => {
+        if (!(window as any).fbq) return
+        clearInterval(t)
+        fire()
+      }, 100)
+      setTimeout(() => clearInterval(t), 5000)
+    }
+  }, [sessionId, cart.items.length])
 
   useEffect(() => {
     let mounted = true
