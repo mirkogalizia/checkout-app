@@ -1818,60 +1818,7 @@ function CheckoutPageContent() {
         borderRadius: "10px",
         fontSizeBase: "16px",
       },
-      rules: {
-        ".Input": {
-          border: "1px solid #e5e7eb",
-          boxShadow: "none",
-          padding: "12px 14px",
-        },
-        ".Input:focus": {
-          border: "1px solid #1d1d1f",
-          boxShadow: "0 0 0 2px rgba(29, 29, 31, 0.08)",
-        },
-        ".Label": {
-          fontSize: "12px",
-          fontWeight: "500",
-          color: "#6b7280",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        },
-      },
-    },
-  }
 
-  return (
-    <Elements stripe={stripePromise} options={elementsOptions}>
-      <CheckoutInner cart={cart} sessionId={sessionId} />
-    </Elements>
-  )
-}
-
-export default function CheckoutPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="w-10 h-10 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
-        </div>
-      }
-    >
-      <CheckoutPageContent />
-    </Suspense>
-  )
-}
-        },
-        ".Input:focus": {
-          border: "1px solid #1d1d1f",
-          boxShadow: "0 0 0 2px rgba(29, 29, 31, 0.08)",
-        },
-        ".Label": {
-          fontSize: "12px",
-          fontWeight: "500",
-          color: "#6b7280",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        },
-      },
     },
   }
 
