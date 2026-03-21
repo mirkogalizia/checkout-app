@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
     // Rilascia il lock se presente, altrimenti la sessione rimane bloccata
     // per sempre e i retry non possono più processarla
     try {
-      const sessionId = (event?.data?.object as any)?.metadata?.session_id
+      const sessionId = ((event as any)?.data?.object)?.metadata?.session_id
       if (sessionId) {
         await db.collection(COLLECTION).doc(sessionId).update({
           webhookProcessing: false,
