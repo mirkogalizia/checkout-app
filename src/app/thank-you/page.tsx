@@ -98,9 +98,31 @@ function ThankYouContent() {
         return
       }
       try {
-        const res = await fetch(`/api/cart-session?sessionId=${sessionId}`)
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || "Errore caricamento ordine")
+        // Polling su shopifyOrderNumber: il webhook Stripe impiega 2-5s dopo
+        // il redirect. Ritentiamo ogni 2s per max 15s prima di procedere
+        // senza orderNumber (la pagina mostra comunque i dati dell'ordine).
+        let data: any = null
+        const MAX_ATTEMPTS = 8   // 8 × 2s = 16s max
+        const POLL_INTERVAL = 2000
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          const res = await fetch(`/api/cart-session?sessionId=${sessionId}`)
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}))
+            throw new Error(errData.error || "Errore caricamento ordine")
+          }
+          data = await res.json()
+          if (data.shopifyOrderNumber) {
+            console.log(`[thank-you] ✅ shopifyOrderNumber ricevuto al tentativo ${attempt}: #${data.shopifyOrderNumber}`)
+            break
+          }
+          if (attempt < MAX_ATTEMPTS) {
+            console.log(`[thank-you] ⏳ shopifyOrderNumber non ancora disponibile (tentativo ${attempt}/${MAX_ATTEMPTS}), riprovo tra ${POLL_INTERVAL}ms...`)
+            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL))
+          } else {
+            console.warn(`[thank-you] ⚠️ shopifyOrderNumber non disponibile dopo ${MAX_ATTEMPTS} tentativi — procedo senza`)
+          }
+        }
 
         const subtotal = data.subtotalCents || 0
         const shipping = 590
