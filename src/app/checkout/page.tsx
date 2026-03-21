@@ -16,6 +16,7 @@ import { loadStripe, Stripe } from "@stripe/stripe-js"
 import {
   Elements,
   PaymentElement,
+  ExpressCheckoutElement,
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js"
@@ -58,7 +59,6 @@ type CustomerForm = {
   province: string
   countryCode: string
 }
-
 
 // ── GEO CONFIG ────────────────────────────────────────────────────────
 type GeoLabels = {
@@ -172,7 +172,6 @@ const GEO_CONFIG: Record<string, GeoConfig> = {
 
 function getGeoConfig(country: string): GeoConfig {
   if (GEO_CONFIG[country]) return GEO_CONFIG[country]
-  // Paese non in lista: inglese con countryCode reale dall'IP
   return {
     countryCode: country,
     phonePrefix: "",
@@ -201,6 +200,341 @@ function formatMoney(cents: number | undefined, currency: string = "EUR") {
   }).format(value)
 }
 
+// ── STEP INDICATOR ────────────────────────────────────────────────────
+function StepIndicator({ currentStep }: { currentStep: number }) {
+  const steps = ["Contatti", "Consegna", "Pagamento"]
+  return (
+    <div className="flex items-center justify-center gap-0 mb-6">
+      {steps.map((label, i) => {
+        const idx = i + 1
+        const done = currentStep > idx
+        const active = currentStep === idx
+        return (
+          <React.Fragment key={label}>
+            <div className="flex flex-col items-center">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                  done
+                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-200"
+                    : active
+                    ? "bg-gray-900 text-white shadow-md"
+                    : "bg-gray-100 text-gray-400 border border-gray-200"
+                }`}
+              >
+                {done ? (
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : idx}
+              </div>
+              <span className={`text-[10px] mt-1 font-medium ${active ? "text-gray-900" : done ? "text-emerald-600" : "text-gray-400"}`}>
+                {label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <div className={`h-px w-10 mb-4 mx-1 transition-all duration-300 ${done ? "bg-emerald-400" : "bg-gray-200"}`} />
+            )}
+          </React.Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── TRUST BADGES ROW ──────────────────────────────────────────────────
+function TrustBadges() {
+  return (
+    <div className="grid grid-cols-3 gap-2 mb-5">
+      {[
+        { icon: "🔒", label: "SSL 256-bit" },
+        { icon: "🚚", label: "24/48h" },
+        { icon: "↩️", label: "14gg reso" },
+      ].map(({ icon, label }) => (
+        <div key={label} className="flex flex-col items-center gap-1 py-2.5 px-2 bg-gray-50 rounded-xl border border-gray-100">
+          <span className="text-base">{icon}</span>
+          <span className="text-[10px] font-semibold text-gray-600 text-center leading-tight">{label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── SECTION CARD ──────────────────────────────────────────────────────
+function SectionCard({ title, children, className = "" }: { title?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4 ${className}`}>
+      {title && (
+        <div className="px-5 pt-5 pb-3 border-b border-gray-50">
+          <h2 className="text-sm font-semibold text-gray-900 tracking-wide uppercase">{title}</h2>
+        </div>
+      )}
+      <div className="p-5">{children}</div>
+    </div>
+  )
+}
+
+// ── FLOATING LABEL INPUT ──────────────────────────────────────────────
+function FloatingInput({
+  label,
+  type = "text",
+  name,
+  value,
+  onChange,
+  placeholder,
+  required,
+  autoComplete,
+  inputRef,
+}: {
+  label: string
+  type?: string
+  name?: string
+  value: string
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void
+  placeholder?: string
+  required?: boolean
+  autoComplete?: string
+  inputRef?: React.Ref<HTMLInputElement>
+}) {
+  const [focused, setFocused] = useState(false)
+  const hasValue = value.length > 0
+  const floated = focused || hasValue
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type={type}
+        name={name}
+        value={value}
+        onChange={onChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={floated ? placeholder : ""}
+        required={required}
+        autoComplete={autoComplete}
+        className={`w-full px-4 pt-6 pb-2 text-[16px] text-gray-900 bg-white border rounded-xl transition-all duration-200 outline-none appearance-none
+          ${focused
+            ? "border-gray-900 shadow-[0_0_0_2px_rgba(17,24,39,0.08)]"
+            : hasValue
+            ? "border-gray-300"
+            : "border-gray-200"
+          }`}
+      />
+      <label
+        className={`absolute left-4 transition-all duration-200 pointer-events-none select-none
+          ${floated
+            ? "top-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider"
+            : "top-1/2 -translate-y-1/2 text-sm text-gray-400"
+          }`}
+      >
+        {label}{required && <span className="text-red-400 ml-0.5">*</span>}
+      </label>
+    </div>
+  )
+}
+
+// ── FLOATING SELECT ───────────────────────────────────────────────────
+function FloatingSelect({
+  label,
+  name,
+  value,
+  onChange,
+  children,
+  required,
+}: {
+  label: string
+  name?: string
+  value: string
+  onChange: (e: ChangeEvent<HTMLSelectElement>) => void
+  children: React.ReactNode
+  required?: boolean
+}) {
+  const [focused, setFocused] = useState(false)
+
+  return (
+    <div className="relative">
+      <select
+        name={name}
+        value={value}
+        onChange={onChange}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        required={required}
+        className={`w-full px-4 pt-6 pb-2 text-[16px] text-gray-900 bg-white border rounded-xl transition-all duration-200 outline-none appearance-none
+          ${focused
+            ? "border-gray-900 shadow-[0_0_0_2px_rgba(17,24,39,0.08)]"
+            : "border-gray-200"
+          }`}
+      >
+        {children}
+      </select>
+      <label className="absolute left-4 top-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider pointer-events-none select-none">
+        {label}{required && <span className="text-red-400 ml-0.5">*</span>}
+      </label>
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+    </div>
+  )
+}
+
+// ── ORDER SUMMARY (mobile accordion + desktop static) ─────────────────
+function OrderSummary({
+  cart,
+  subtotalCents,
+  discountCents,
+  shippingToApply,
+  totalToPayCents,
+  currency,
+  mobile = false,
+}: {
+  cart: CartSessionResponse
+  subtotalCents: number
+  discountCents: number
+  shippingToApply: number
+  totalToPayCents: number
+  currency: string
+  mobile?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+
+  const inner = (
+    <>
+      {discountCents > 0 && (
+        <div className="mb-4 p-4 bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 rounded-xl">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-bold text-emerald-700">🎉 Stai risparmiando</span>
+            <span className="ml-auto text-lg font-black text-emerald-600">-{formatMoney(discountCents, currency)}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-3 mb-5">
+        {cart.items.map((item, idx) => {
+          const originalPrice = item.priceCents || 0
+          const currentPrice = item.linePriceCents || 0
+          const expectedTotal = originalPrice * item.quantity
+          const discountAmount = expectedTotal - currentPrice
+          const isFullyFree = currentPrice === 0 && originalPrice > 0
+          const isDiscounted = discountAmount > 0
+
+          return (
+            <div key={idx} className="flex gap-3 relative">
+              {isFullyFree && (
+                <div className="absolute -top-2.5 left-14 z-10 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  GRATIS 🎁
+                </div>
+              )}
+              {!isFullyFree && isDiscounted && (
+                <div className="absolute -top-2 left-14 z-10 bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  SCONTO
+                </div>
+              )}
+              {item.image && (
+                <div className="relative flex-shrink-0">
+                  <img
+                    src={item.image}
+                    alt={item.title}
+                    className="w-16 h-16 object-cover rounded-xl border border-gray-100 shadow-sm"
+                  />
+                  <span className="absolute -top-1.5 -right-1.5 bg-gray-800 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-bold shadow">
+                    {item.quantity}
+                  </span>
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900 leading-tight">{item.title}</p>
+                {item.variantTitle && (
+                  <p className="text-xs text-gray-400 mt-0.5">{item.variantTitle}</p>
+                )}
+                {isDiscounted && (
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="text-xs line-through text-gray-300">{formatMoney(expectedTotal, currency)}</span>
+                    {isFullyFree
+                      ? <span className="text-xs font-bold text-emerald-600">GRATIS</span>
+                      : <span className="text-xs font-semibold text-red-500">-{formatMoney(discountAmount, currency)}</span>
+                    }
+                  </div>
+                )}
+              </div>
+              <div className="flex-shrink-0 text-right">
+                {isFullyFree ? (
+                  <span className="text-sm font-bold text-emerald-600">€0,00</span>
+                ) : isDiscounted ? (
+                  <span className="text-sm font-bold text-gray-900">{formatMoney(currentPrice, currency)}</span>
+                ) : (
+                  <span className="text-sm font-semibold text-gray-900">{formatMoney(currentPrice, currency)}</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="border-t border-gray-100 pt-4 space-y-2.5 text-sm">
+        <div className="flex justify-between text-gray-500">
+          <span>Subtotale</span>
+          <span className="text-gray-900 font-medium">{formatMoney(subtotalCents, currency)}</span>
+        </div>
+        {discountCents > 0 && (
+          <div className="flex justify-between text-emerald-600">
+            <span className="font-medium">✨ Sconto</span>
+            <span className="font-semibold">-{formatMoney(discountCents, currency)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-gray-500">
+          <span>Spedizione</span>
+          <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
+        </div>
+        <div className="flex justify-between pt-3 border-t border-gray-100">
+          <span className="text-base font-bold text-gray-900">Totale</span>
+          <span className="text-xl font-black text-gray-900">{formatMoney(totalToPayCents, currency)}</span>
+        </div>
+      </div>
+    </>
+  )
+
+  if (!mobile) return inner
+
+  // Mobile accordion
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3.5 bg-white border border-gray-100 rounded-2xl shadow-sm tap-highlight-none"
+      >
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 11H4L5 9z" />
+          </svg>
+          <span className="text-sm font-semibold text-gray-700">
+            {open ? "Nascondi ordine" : `Mostra ordine (${cart.items.length} ${cart.items.length === 1 ? "articolo" : "articoli"})`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-black text-gray-900">{formatMoney(totalToPayCents, currency)}</span>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      <div className={`overflow-hidden transition-all duration-300 ${open ? "max-h-[800px] opacity-100 mt-2" : "max-h-0 opacity-0"}`}>
+        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4">
+          {inner}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── MAIN CHECKOUT INNER ───────────────────────────────────────────────
 function CheckoutInner({
   cart,
   sessionId,
@@ -212,10 +546,8 @@ function CheckoutInner({
   const elements = useElements()
 
   const cartUrl = useMemo(() => {
-    if (cart.shopDomain) {
-      return `https://${cart.shopDomain}/cart`
-    }
-    return 'https://notforresale.it/cart'
+    if (cart.shopDomain) return `https://${cart.shopDomain}/cart`
+    return "https://notforresale.it/cart"
   }, [cart.shopDomain])
 
   const [customer, setCustomer] = useState<CustomerForm>({
@@ -250,10 +582,8 @@ function CheckoutInner({
   const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [shippingError, setShippingError] = useState<string | null>(null)
-  const [orderSummaryExpanded, setOrderSummaryExpanded] = useState(false)
-  // fbPixelSent rimosso: guard sostituito da sessionStorage + useRef
+  const [expressPaymentReady, setExpressPaymentReady] = useState(false)
 
-  // ── GEO STATE ─────────────────────────────────────────────────────────
   const [geo, setGeo] = useState<GeoConfig>(GEO_CONFIG["IT"])
 
   useEffect(() => {
@@ -274,13 +604,9 @@ function CheckoutInner({
       })
       .catch(() => {})
   }, [])
-  // ─────────────────────────────────────────────────────────────────────
-
-
 
   const [lastCalculatedHash, setLastCalculatedHash] = useState<string>("")
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
-
   const addressInputRef = useRef<HTMLInputElement>(null)
   const autocompleteRef = useRef<any>(null)
   const scriptLoadedRef = useRef(false)
@@ -303,36 +629,32 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  // ✅ SEMPRE SPEDIZIONE FISSA A 5.90€
   const SHIPPING_COST_CENTS = 590
   const shippingToApply = SHIPPING_COST_CENTS
   const totalToPayCents = subtotalCents - discountCents + shippingToApply
 
   const firstName = customer.fullName.split(" ")[0] || ""
   const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
-
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // FACEBOOK PIXEL - INITIATE CHECKOUT
-  // Guard sessionStorage: evita double-fire su refresh o back-button.
-  // eventID formato: "initiate_checkout_{sessionId}" — stabile e unico per sessione.
-  // Non mandiamo UTM nel payload browser: Meta li ignora, vanno solo via CAPI.
-  const pixelInitRef = useRef(false)
+  // Compute step for indicator
+  const formStep = useMemo(() => {
+    const hasContact = customer.email.includes("@") && customer.fullName.trim().length > 2
+    const hasAddress = customer.address1.trim().length > 3 && customer.city.trim().length > 1
+    if (!hasContact) return 1
+    if (!hasAddress) return 2
+    return 3
+  }, [customer])
 
+  // Facebook Pixel
+  const pixelInitRef = useRef(false)
   useEffect(() => {
     if (!sessionId || cart.items.length === 0) return
-
-    // Guard A: StrictMode double mount
     if (pixelInitRef.current) return
     pixelInitRef.current = true
-
-    // Guard B: refresh / back button
     const storageKey = `meta_pixel_fired_initiate_${sessionId}`
-    if (sessionStorage.getItem(storageKey)) {
-      console.log('[Checkout] InitiateCheckout già sparato per', sessionId, '— skip')
-      return
-    }
+    if (sessionStorage.getItem(storageKey)) return
 
     const eventId = `initiate_checkout_${sessionId}`
     const contentIds = cart.items.map(item => String(item.id)).filter(Boolean)
@@ -340,15 +662,14 @@ function CheckoutInner({
 
     const fire = () => {
       if (!(window as any).fbq) return
-      sessionStorage.setItem(storageKey, '1')
-      ;(window as any).fbq('track', 'InitiateCheckout', {
+      sessionStorage.setItem(storageKey, "1")
+      ;(window as any).fbq("track", "InitiateCheckout", {
         value: totalToPayCents / 100,
-        currency: currency,
+        currency,
         content_ids: contentIds,
-        content_type: 'product',
+        content_type: "product",
         num_items: numItems,
       }, { eventID: eventId })
-      console.log('[Checkout] ✅ InitiateCheckout fired | eventID:', eventId, '| value:', totalToPayCents / 100, currency)
     }
 
     if ((window as any).fbq) {
@@ -363,6 +684,7 @@ function CheckoutInner({
     }
   }, [sessionId, cart.items.length])
 
+  // Google Maps Autocomplete
   useEffect(() => {
     let mounted = true
     const win = window as any
@@ -381,9 +703,7 @@ function CheckoutInner({
           addressInputRef.current,
           {
             types: ["address"],
-            componentRestrictions: {
-              country: ["it", "fr", "de", "es", "at", "be", "nl", "ch", "pt"],
-            },
+            componentRestrictions: { country: ["it", "fr", "de", "es", "at", "be", "nl", "ch", "pt"] },
             fields: ["address_components", "formatted_address", "geometry"],
           }
         )
@@ -401,28 +721,13 @@ function CheckoutInner({
       scriptLoadedRef.current = true
       const script = document.createElement("script")
       const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-
-      if (!apiKey) {
-        console.error("[Autocomplete] API Key mancante")
-        return
-      }
+      if (!apiKey) return
 
       script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&language=it&callback=initGoogleMaps`
       script.async = true
       script.defer = true
-
-      win.initGoogleMaps = () => {
-        if (mounted) {
-          requestAnimationFrame(() => {
-            initAutocomplete()
-          })
-        }
-      }
-
-      script.onerror = () => {
-        console.error("[Autocomplete] Errore caricamento")
-      }
-
+      win.initGoogleMaps = () => { if (mounted) requestAnimationFrame(initAutocomplete) }
+      script.onerror = () => console.error("[Autocomplete] Errore caricamento")
       document.head.appendChild(script)
     } else if (win.google?.maps?.places) {
       initAutocomplete()
@@ -431,9 +736,7 @@ function CheckoutInner({
     return () => {
       mounted = false
       if (autocompleteRef.current && win.google?.maps?.event) {
-        try {
-          win.google.maps.event.clearInstanceListeners(autocompleteRef.current)
-        } catch (e) {}
+        try { win.google.maps.event.clearInstanceListeners(autocompleteRef.current) } catch (e) {}
       }
     }
   }, [])
@@ -442,12 +745,7 @@ function CheckoutInner({
     const place = autocompleteRef.current?.getPlace()
     if (!place || !place.address_components) return
 
-    let street = ""
-    let streetNumber = ""
-    let city = ""
-    let province = ""
-    let postalCode = ""
-    let country = ""
+    let street = "", streetNumber = "", city = "", province = "", postalCode = "", country = ""
 
     place.address_components.forEach((component: any) => {
       const types = component.types
@@ -463,8 +761,7 @@ function CheckoutInner({
     })
 
     const fullAddress = streetNumber ? `${street} ${streetNumber}` : street
-
-    setCustomer((prev) => ({
+    setCustomer(prev => ({
       ...prev,
       address1: fullAddress || prev.address1,
       city: city || prev.city,
@@ -476,11 +773,11 @@ function CheckoutInner({
 
   function handleChange(e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target
-    setCustomer((prev) => ({ ...prev, [name]: value }))
+    setCustomer(prev => ({ ...prev, [name]: value }))
   }
 
   function isFormValid() {
-    const shippingValid = 
+    const shippingValid =
       customer.fullName.trim().length > 2 &&
       customer.email.trim().includes("@") &&
       customer.email.trim().length > 5 &&
@@ -529,14 +826,9 @@ function CheckoutInner({
         return
       }
 
-      if (formHash === lastCalculatedHash && clientSecret) {
-        console.log('[Checkout] 💾 Form invariato, riuso Payment Intent')
-        return
-      }
+      if (formHash === lastCalculatedHash && clientSecret) return
 
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
 
       debounceTimerRef.current = setTimeout(async () => {
         setIsCalculatingShipping(true)
@@ -544,15 +836,13 @@ function CheckoutInner({
         setShippingError(null)
 
         try {
-          const flatShippingCents = 590 // ✅ SEMPRE 5.90€
+          const flatShippingCents = 590
           setCalculatedShippingCents(flatShippingCents)
 
           const shopifyTotal = typeof cart.totalCents === "number" ? cart.totalCents : subtotalCents
           const currentDiscountCents = subtotalCents - shopifyTotal
           const finalDiscountCents = currentDiscountCents > 0 ? currentDiscountCents : 0
           const newTotalCents = subtotalCents - finalDiscountCents + flatShippingCents
-
-          console.log('[Checkout] 🆕 Creazione Payment Intent...')
 
           const piRes = await fetch("/api/payment-intent", {
             method: "POST",
@@ -580,7 +870,6 @@ function CheckoutInner({
             throw new Error(piData.error || "Errore creazione pagamento")
           }
 
-          console.log('[Checkout] ✅ ClientSecret ricevuto')
           setClientSecret(piData.clientSecret)
           setLastCalculatedHash(formHash)
           setIsCalculatingShipping(false)
@@ -595,33 +884,16 @@ function CheckoutInner({
     calculateShipping()
 
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
   }, [
-    customer.fullName,
-    customer.email,
-    customer.phone,
-    customer.address1,
-    customer.address2,
-    customer.city,
-    customer.postalCode,
-    customer.province,
-    customer.countryCode,
-    billingAddress.fullName,
-    billingAddress.address1,
-    billingAddress.city,
-    billingAddress.postalCode,
-    billingAddress.province,
-    billingAddress.countryCode,
-    useDifferentBilling,
-    sessionId,
-    subtotalCents,
-    cart.totalCents,
-    clientSecret,
-    lastCalculatedHash,
-    discountCents,
+    customer.fullName, customer.email, customer.phone,
+    customer.address1, customer.address2, customer.city,
+    customer.postalCode, customer.province, customer.countryCode,
+    billingAddress.fullName, billingAddress.address1, billingAddress.city,
+    billingAddress.postalCode, billingAddress.province, billingAddress.countryCode,
+    useDifferentBilling, sessionId, subtotalCents, cart.totalCents,
+    clientSecret, lastCalculatedHash, discountCents,
   ])
 
   async function handleSubmit(e: FormEvent) {
@@ -649,7 +921,6 @@ function CheckoutInner({
 
       const { error: submitError } = await elements.submit()
       if (submitError) {
-        console.error("Errore submit elements:", submitError)
         setError(submitError.message || "Errore nella validazione")
         setLoading(false)
         return
@@ -660,16 +931,13 @@ function CheckoutInner({
       const { error: stripeError } = await stripe.confirmPayment({
         elements,
         clientSecret,
-
         confirmParams: {
           return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
-
           payment_method_data: {
             billing_details: {
               name: finalBillingAddress.fullName || customer.fullName,
               email: customer.email,
               phone: finalBillingAddress.phone || customer.phone,
-
               address: {
                 line1: finalBillingAddress.address1,
                 line2: finalBillingAddress.address2 || undefined,
@@ -679,24 +947,12 @@ function CheckoutInner({
                 country: finalBillingAddress.countryCode || "IT",
               },
             },
-
-            metadata: {
-              session_id: sessionId,
-              customer_fullName: customer.fullName,
-              customer_email: customer.email,
-              shipping_city: customer.city,
-              shipping_postal: customer.postalCode,
-              shipping_country: customer.countryCode,
-              checkout_type: "custom",
-            },
           },
         },
-
         redirect: "if_required",
       })
 
       if (stripeError) {
-        console.error("Stripe error:", stripeError)
         setError(stripeError.message || "Pagamento non riuscito")
         setLoading(false)
         return
@@ -704,20 +960,93 @@ function CheckoutInner({
 
       setSuccess(true)
       setLoading(false)
-
       setTimeout(() => {
         window.location.href = `/thank-you?sessionId=${sessionId}`
       }, 2000)
     } catch (err: any) {
-      console.error("Errore pagamento:", err)
       setError(err.message || "Errore imprevisto")
       setLoading(false)
     }
   }
 
+  // ── Apple Pay / Google Pay express confirm ────────────────────────
+  async function handleExpressConfirm(event: any) {
+    if (!stripe || !elements) return
+
+    const shippingAddr = event.shippingAddress
+    const name = event.billingDetails?.name || customer.fullName || ""
+    const email = event.billingDetails?.email || customer.email || ""
+    const phone = event.billingDetails?.phone || customer.phone || ""
+
+    // If we have express payment data and no clientSecret yet, create PI first
+    let secret = clientSecret
+    if (!secret) {
+      try {
+        const piRes = await fetch("/api/payment-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            amountCents: totalToPayCents,
+            customer: {
+              fullName: name,
+              email,
+              phone,
+              address1: shippingAddr?.address?.line1 || "",
+              address2: shippingAddr?.address?.line2 || "",
+              city: shippingAddr?.address?.city || "",
+              postalCode: shippingAddr?.address?.postal_code || "",
+              province: shippingAddr?.address?.state || "",
+              countryCode: shippingAddr?.address?.country || "IT",
+            },
+          }),
+        })
+        const piData = await piRes.json()
+        if (!piRes.ok || !piData.clientSecret) {
+          event.paymentFailed?.({ reason: "fail" })
+          return
+        }
+        secret = piData.clientSecret
+        setClientSecret(secret)
+      } catch {
+        event.paymentFailed?.({ reason: "fail" })
+        return
+      }
+    }
+
+    const { error } = await stripe.confirmPayment({
+      elements,
+      clientSecret: secret!,
+      confirmParams: {
+        return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
+        payment_method_data: {
+          billing_details: {
+            name,
+            email,
+            phone,
+            ...(shippingAddr?.address && {
+              address: {
+                line1: shippingAddr.address.line1 || "",
+                line2: shippingAddr.address.line2 || undefined,
+                city: shippingAddr.address.city || "",
+                postal_code: shippingAddr.address.postal_code || "",
+                country: shippingAddr.address.country || "IT",
+              },
+            }),
+          },
+        },
+      },
+    })
+
+    if (error) {
+      console.error("Express payment error:", error)
+      event.paymentFailed?.({ reason: "fail" })
+    }
+  }
+
   return (
     <>
-      {/* ✅ FACEBOOK PIXEL */}
+      {/* Facebook Pixel */}
       <Script id="facebook-pixel" strategy="afterInteractive">
         {`
           !function(f,b,e,v,n,t,s)
@@ -730,1202 +1059,653 @@ function CheckoutInner({
           'https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '3891846021132542');
           fbq('track', 'PageView');
-          console.log('[Checkout] ✅ Facebook Pixel inizializzato');
         `}
       </Script>
       <noscript>
-        <img 
-          height="1" 
-          width="1" 
-          style={{ display: 'none' }}
-          src="https://www.facebook.com/tr?id=3891846021132542&ev=PageView&noscript=1"
-        />
+        <img height="1" width="1" style={{ display: "none" }}
+          src="https://www.facebook.com/tr?id=3891846021132542&ev=PageView&noscript=1" />
       </noscript>
 
       <style jsx global>{`
-        * {
-          box-sizing: border-box;
-          margin: 0;
-          padding: 0;
-        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          background: #fafafa;
-          color: #333333;
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+          background: #f5f5f7;
+          color: #1d1d1f;
           -webkit-font-smoothing: antialiased;
+          -webkit-text-size-adjust: 100%;
         }
 
-        .shopify-input {
-          width: 100%;
-          padding: 14px 16px;
-          font-size: 16px;
-          line-height: 1.5;
-          color: #333333;
-          background: #ffffff;
-          border: 1px solid #d9d9d9;
-          border-radius: 10px;
-          transition: all 0.2s ease;
+        input, select, button, textarea {
+          font-family: inherit;
           -webkit-appearance: none;
           appearance: none;
         }
 
-        .shopify-input:focus {
-          outline: none;
-          border-color: #2C6ECB;
-          box-shadow: 0 0 0 3px rgba(44, 110, 203, 0.1);
-        }
-
-        .shopify-input::placeholder {
-          color: #999999;
-        }
-
-        .shopify-label {
-          display: block;
-          font-size: 14px;
-          font-weight: 500;
-          color: #333333;
-          margin-bottom: 8px;
-        }
-
-        .shopify-btn {
-          width: 100%;
-          padding: 18px 24px;
-          font-size: 17px;
-          font-weight: 600;
-          color: #ffffff;
-          background: linear-gradient(135deg, #2C6ECB 0%, #1f5bb8 100%);
-          border: none;
-          border-radius: 12px;
-          cursor: pointer;
-          transition: all 0.3s ease;
-          box-shadow: 0 4px 12px rgba(44, 110, 203, 0.3);
-          -webkit-appearance: none;
-          appearance: none;
-          touch-action: manipulation;
-        }
-
-        .shopify-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, #1f5bb8 0%, #164a9e 100%);
-          box-shadow: 0 6px 16px rgba(44, 110, 203, 0.4);
-          transform: translateY(-2px);
-        }
-
-        .shopify-btn:active:not(:disabled) {
-          transform: translateY(0);
-        }
-
-        .shopify-btn:disabled {
-          background: #d1d5db;
-          cursor: not-allowed;
-          box-shadow: none;
-        }
-
-        .shopify-section {
-          background: #ffffff;
-          border: 1px solid #e5e7eb;
-          border-radius: 16px;
-          padding: 24px;
-          margin-bottom: 20px;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-        }
-
-        .shopify-section-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: #111827;
-          margin-bottom: 20px;
-        }
-
-        .summary-toggle {
-          background: #ffffff;
-          border: 1px solid #e5e7eb;
-          border-radius: 12px;
-          padding: 16px;
-          margin-bottom: 20px;
-          cursor: pointer;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          -webkit-tap-highlight-color: transparent;
-          transition: all 0.2s ease;
-        }
-
-        .summary-toggle:active {
-          background: #f9fafb;
-          transform: scale(0.98);
-        }
-
-        .summary-content {
-          background: #ffffff;
-          border: 1px solid #e5e7eb;
-          border-top: none;
-          border-radius: 0 0 12px 12px;
-          padding: 16px;
-          margin-top: -20px;
-          margin-bottom: 20px;
-        }
-
-        .pac-container {
-          background-color: #ffffff !important;
-          border: 1px solid #d9d9d9 !important;
-          border-radius: 10px !important;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-          margin-top: 4px !important;
-          padding: 4px !important;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
-          z-index: 9999 !important;
-        }
-
-        .pac-item {
-          padding: 12px 16px !important;
-          cursor: pointer !important;
-          border: none !important;
-          border-radius: 8px !important;
-          font-size: 14px !important;
-          color: #333333 !important;
-        }
-
-        .pac-item:hover {
-          background-color: #f3f4f6 !important;
-        }
-
-        .pac-icon {
-          display: none !important;
-        }
-
+        /* Prevent iOS zoom on input focus */
         @media (max-width: 768px) {
-          .shopify-input {
+          input, select, textarea {
             font-size: 16px !important;
           }
-          
-          .shopify-btn {
-            min-height: 52px;
-            font-size: 16px;
-          }
-
-          .shopify-section {
-            padding: 20px;
-            border-radius: 12px;
-          }
         }
+
+        .tap-highlight-none {
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Google Places autocomplete */
+        .pac-container {
+          background: #fff !important;
+          border: 1px solid #e5e7eb !important;
+          border-radius: 16px !important;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.12) !important;
+          margin-top: 6px !important;
+          padding: 6px !important;
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif !important;
+          z-index: 9999 !important;
+          overflow: hidden !important;
+        }
+        .pac-item {
+          padding: 10px 14px !important;
+          cursor: pointer !important;
+          border: none !important;
+          border-radius: 10px !important;
+          font-size: 14px !important;
+          color: #1d1d1f !important;
+          transition: background 0.15s !important;
+        }
+        .pac-item:hover { background: #f5f5f7 !important; }
+        .pac-icon { display: none !important; }
+        .pac-item-query { font-weight: 600 !important; color: #1d1d1f !important; }
+
+        /* Stripe Elements override */
+        .StripeElement {
+          border-radius: 12px !important;
+        }
+
+        /* Express checkout container */
+        #express-checkout-element iframe {
+          border-radius: 14px !important;
+        }
+
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+          animation: fadeInUp 0.4s ease forwards;
+        }
+
+        @keyframes pulse-ring {
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.3); }
+          70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .pulse-green { animation: pulse-ring 2s infinite; }
       `}</style>
 
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
-          <div className="max-w-6xl mx-auto px-4 py-4">
-            <div className="flex justify-between items-center">
-              <a href={cartUrl} className="flex items-center gap-2">
-                <img
-                  src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
-                  alt="Logo"
-                  className="h-10"
-                  style={{ maxWidth: '160px' }}
-                />
-              </a>
+      {/* ── HEADER ─────────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+          <a href={cartUrl} className="flex items-center gap-1.5 text-gray-500 hover:text-gray-800 transition-colors tap-highlight-none">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            <span className="text-xs font-medium hidden sm:inline">Carrello</span>
+          </a>
 
-              <div className="hidden md:flex items-center gap-6">
-                <div className="flex items-center gap-2 text-xs text-gray-600">
-                  <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                  </svg>
-                  <span className="font-medium">SSL Sicuro</span>
-                </div>
+          <img
+            src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
+            alt="Logo"
+            className="h-8 object-contain"
+            style={{ maxWidth: "140px" }}
+          />
 
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-full border border-emerald-200">
-                  <svg className="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-xs font-semibold text-emerald-700">Pagamento Protetto</span>
-                </div>
-              </div>
-
-              <div className="md:hidden flex items-center gap-2 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-200">
-                <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                </svg>
-                <span className="text-xs font-semibold text-emerald-700">Sicuro</span>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-              <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-md">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-gray-900 leading-tight">Pagamenti</p>
-                  <p className="text-xs text-gray-600 leading-tight">100% Sicuri</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center shadow-md">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                    <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-gray-900 leading-tight">Spedizione</p>
-                  <p className="text-xs text-gray-600 leading-tight">24/48 ore</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-md">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-gray-900 leading-tight">Reso Facile</p>
-                  <p className="text-xs text-gray-600 leading-tight">Entro 14 gg</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center shadow-md">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-gray-900 leading-tight">Supporto</p>
-                  <p className="text-xs text-gray-600 leading-tight">7 giorni/7</p>
-                </div>
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-100">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-green" />
+            <span className="text-[11px] font-semibold text-emerald-700">Sicuro</span>
           </div>
         </div>
+      </header>
 
-        {/* ✅ RIMOSSO BANNER SPEDIZIONE GRATUITA */}
+      <div className="max-w-5xl mx-auto px-4 py-5 pb-24 lg:pb-8">
+        <div className="lg:grid lg:grid-cols-[1fr_380px] lg:gap-8 lg:items-start">
 
-        <div className="max-w-2xl mx-auto px-4 lg:hidden">
-          <div
-            className="summary-toggle"
-            onClick={() => setOrderSummaryExpanded(!orderSummaryExpanded)}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                style={{
-                  transform: orderSummaryExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.2s ease'
-                }}
-              >
-                <path d="M4 6L8 10L12 6" stroke="#333" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <span className="text-sm font-medium text-blue-600">
-                {orderSummaryExpanded ? 'Nascondi' : 'Mostra'} riepilogo ordine
-              </span>
+          {/* ── LEFT COLUMN ──────────────────────────────────────────── */}
+          <div>
+
+            {/* Mobile Order Summary */}
+            <div className="lg:hidden">
+              <OrderSummary
+                cart={cart}
+                subtotalCents={subtotalCents}
+                discountCents={discountCents}
+                shippingToApply={shippingToApply}
+                totalToPayCents={totalToPayCents}
+                currency={currency}
+                mobile
+              />
             </div>
-            <span className="text-base font-semibold">{formatMoney(totalToPayCents, currency)}</span>
-          </div>
 
-          {orderSummaryExpanded && (
-            <div className="summary-content">
-              {discountCents > 0 && (
-                <div className="mb-4 p-4 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl shadow-md">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center">
-                      <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <h3 className="text-base font-bold text-gray-900">🎉 Stai Risparmiando!</h3>
+            {/* Step Indicator */}
+            <StepIndicator currentStep={formStep} />
+
+            {/* ── EXPRESS CHECKOUT (Apple Pay / Google Pay) ─────────── */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4 animate-fade-in-up">
+              <div className="px-5 pt-5 pb-3">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest text-center mb-3">
+                  Pagamento rapido
+                </p>
+                <ExpressCheckoutElement
+                  id="express-checkout-element"
+                  onConfirm={handleExpressConfirm}
+                  onReady={(event) => {
+                    const available = event.availablePaymentMethods
+                    setExpressPaymentReady(!!(available?.applePay || available?.googlePay))
+                  }}
+                  options={{
+                    buttonType: {
+                      applePay: "buy",
+                      googlePay: "buy",
+                    },
+                    buttonTheme: {
+                      applePay: "black",
+                      googlePay: "black",
+                    },
+                    layout: {
+                      maxColumns: 1,
+                      maxRows: 3,
+                      overflow: "auto",
+                    },
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center gap-3 px-5 pb-5">
+                <div className="flex-1 h-px bg-gray-100" />
+                <span className="text-[11px] font-medium text-gray-400">oppure inserisci i tuoi dati</span>
+                <div className="flex-1 h-px bg-gray-100" />
+              </div>
+            </div>
+
+            {/* ── FORM ─────────────────────────────────────────────────── */}
+            <form onSubmit={handleSubmit} noValidate>
+
+              {/* CONTATTI */}
+              <SectionCard title={geo.labels.contacts}>
+                <div className="space-y-3">
+                  <FloatingInput
+                    label={geo.labels.email}
+                    type="email"
+                    name="email"
+                    value={customer.email}
+                    onChange={handleChange}
+                    placeholder="mario@esempio.com"
+                    required
+                    autoComplete="email"
+                  />
+                  <div className="flex items-start gap-2 mt-2">
+                    <input
+                      type="checkbox"
+                      id="emailUpdates"
+                      className="w-4 h-4 mt-0.5 flex-shrink-0 rounded accent-gray-900"
+                    />
+                    <label htmlFor="emailUpdates" className="text-xs text-gray-500 leading-relaxed cursor-pointer">
+                      {geo.labels.emailUpdates}
+                    </label>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-700 font-medium">💸 Sconto Prodotti</span>
-                      <span className="text-lg font-bold text-green-600">-{formatMoney(discountCents, currency)}</span>
+                </div>
+              </SectionCard>
+
+              {/* CONSEGNA */}
+              <SectionCard title={geo.labels.delivery}>
+                <div className="space-y-3">
+                  <FloatingSelect
+                    label={geo.labels.country}
+                    name="countryCode"
+                    value={customer.countryCode}
+                    onChange={handleChange}
+                    required
+                  >
+                    <option value="IT">🇮🇹 Italia</option>
+                    <option value="FR">🇫🇷 Francia</option>
+                    <option value="DE">🇩🇪 Germania</option>
+                    <option value="ES">🇪🇸 Spagna</option>
+                    <option value="PT">🇵🇹 Portogallo</option>
+                    <option value="NL">🇳🇱 Paesi Bassi</option>
+                  </FloatingSelect>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <FloatingInput
+                      label={geo.labels.firstName}
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setCustomer(prev => ({ ...prev, fullName: `${e.target.value} ${lastName}`.trim() }))}
+                      placeholder="Mario"
+                      required
+                      autoComplete="given-name"
+                    />
+                    <FloatingInput
+                      label={geo.labels.lastName}
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setCustomer(prev => ({ ...prev, fullName: `${firstName} ${e.target.value}`.trim() }))}
+                      placeholder="Rossi"
+                      required
+                      autoComplete="family-name"
+                    />
+                  </div>
+
+                  <FloatingInput
+                    label={geo.labels.address}
+                    type="text"
+                    name="address1"
+                    value={customer.address1}
+                    onChange={handleChange}
+                    placeholder="Via Roma 123"
+                    required
+                    autoComplete="address-line1"
+                    inputRef={addressInputRef}
+                  />
+
+                  <FloatingInput
+                    label={geo.labels.address2}
+                    type="text"
+                    name="address2"
+                    value={customer.address2}
+                    onChange={handleChange}
+                    placeholder="Scala B, piano 3"
+                    autoComplete="address-line2"
+                  />
+
+                  <div className="grid grid-cols-5 gap-3">
+                    <div className="col-span-2">
+                      <FloatingInput
+                        label={geo.labels.postalCode}
+                        type="text"
+                        name="postalCode"
+                        value={customer.postalCode}
+                        onChange={handleChange}
+                        placeholder="00100"
+                        required
+                        autoComplete="postal-code"
+                      />
                     </div>
-                    <div className="pt-2 border-t-2 border-green-300 mt-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-bold text-gray-900">Risparmio Totale</span>
-                        <span className="text-xl font-extrabold text-green-600">
-                          -{formatMoney(discountCents, currency)}
-                        </span>
+                    <div className="col-span-3">
+                      <FloatingInput
+                        label={geo.labels.city}
+                        type="text"
+                        name="city"
+                        value={customer.city}
+                        onChange={handleChange}
+                        placeholder="Roma"
+                        required
+                        autoComplete="address-level2"
+                      />
+                    </div>
+                  </div>
+
+                  <FloatingInput
+                    label={geo.labels.province}
+                    type="text"
+                    name="province"
+                    value={customer.province}
+                    onChange={handleChange}
+                    placeholder="RM"
+                    required
+                    autoComplete="address-level1"
+                  />
+
+                  <FloatingInput
+                    label={geo.labels.phone}
+                    type="tel"
+                    name="phone"
+                    value={customer.phone}
+                    onChange={handleChange}
+                    placeholder="+39 333 123 4567"
+                    required
+                    autoComplete="tel"
+                  />
+                </div>
+              </SectionCard>
+
+              {/* METODO DI SPEDIZIONE */}
+              {isFormValid() && (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4 animate-fade-in-up">
+                  <div className="px-5 pt-5 pb-3 border-b border-gray-50">
+                    <h2 className="text-sm font-semibold text-gray-900 tracking-wide uppercase">{geo.labels.shippingMethod}</h2>
+                  </div>
+                  <div className="p-5">
+                    <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                      <div className="w-5 h-5 rounded-full bg-gray-900 border-2 border-gray-900 flex items-center justify-center flex-shrink-0">
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-gray-900">BRT Express</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Consegna in 24/48 ore lavorative</p>
+                      </div>
+                      <span className="text-sm font-bold text-gray-900">€5,90</span>
+                    </div>
+
+                    {/* Social proof */}
+                    <div className="mt-3 flex items-center gap-2 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                      <div className="flex -space-x-2">
+                        {["M", "L", "A"].map((l, i) => (
+                          <div key={i} className={`w-7 h-7 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] font-bold shadow-sm ${["bg-blue-500", "bg-purple-500", "bg-pink-500"][i]}`}>{l}</div>
+                        ))}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-emerald-800">Oltre 2.000+ clienti soddisfatti</p>
+                        <div className="flex gap-0.5 mt-0.5">
+                          {[...Array(5)].map((_, i) => (
+                            <svg key={i} className="w-3 h-3 text-amber-400 fill-current" viewBox="0 0 20 20">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          ))}
+                          <span className="text-[10px] text-emerald-700 font-semibold ml-1">4.9 · Ultima vendita 3min fa</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              <div className="space-y-3 mb-4">
-                {cart.items.map((item, idx) => {
-                  const originalPrice = item.priceCents || 0
-                  const currentPrice = item.linePriceCents || 0
-                  const expectedTotal = originalPrice * item.quantity
-                  const discountAmount = expectedTotal - currentPrice
-                  const isFullyFree = currentPrice === 0 && originalPrice > 0
-                  const isDiscounted = discountAmount > 0
-                  
-                  return (
-                    <div key={idx} className="flex gap-3 relative">
-                      {isFullyFree && (
-                        <div className="absolute -top-2 left-12 z-10 bg-gradient-to-r from-red-500 to-pink-600 text-white text-xs font-extrabold px-2.5 py-1 rounded-full shadow-lg animate-pulse">
-                          3x2 GRATIS 🎁
-                        </div>
-                      )}
-                      {!isFullyFree && isDiscounted && (
-                        <div className="absolute -top-2 left-12 z-10 bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
-                          SCONTO
-                        </div>
-                      )}
-                      
-                      {item.image && (
-                        <div className="relative flex-shrink-0">
-                          <img
-                            src={item.image}
-                            alt={item.title}
-                            className="w-16 h-16 object-cover rounded-lg border border-gray-200"
-                          />
-                          <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium shadow-sm">
-                            {item.quantity}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                        {item.variantTitle && (
-                          <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
-                        )}
-                        {isDiscounted && (
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs line-through text-gray-400">
-                              {formatMoney(expectedTotal, currency)}
-                            </span>
-                            {isFullyFree ? (
-                              <span className="text-xs font-extrabold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
-                                -100% GRATIS
-                              </span>
-                            ) : (
-                              <span className="text-xs font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
-                                -{formatMoney(discountAmount, currency)}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end justify-center">
-                        {isFullyFree ? (
-                          <>
-                            <p className="text-xs line-through text-gray-400">
-                              {formatMoney(expectedTotal, currency)}
-                            </p>
-                            <p className="text-base font-extrabold text-green-600">
-                              GRATIS
-                            </p>
-                          </>
-                        ) : isDiscounted ? (
-                          <>
-                            <p className="text-xs line-through text-gray-400">
-                              {formatMoney(expectedTotal, currency)}
-                            </p>
-                            <p className="text-sm font-bold text-green-600">
-                              {formatMoney(currentPrice, currency)}
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm font-medium text-gray-900">
-                            {formatMoney(currentPrice, currency)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+              {/* INDIRIZZO FATTURAZIONE DIVERSO */}
+              <div className="flex items-center gap-3 px-4 py-3.5 bg-white rounded-2xl border border-gray-100 shadow-sm mb-4 cursor-pointer tap-highlight-none"
+                onClick={() => setUseDifferentBilling(v => !v)}>
+                <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-all flex-shrink-0 ${useDifferentBilling ? "bg-gray-900 border-gray-900" : "border-gray-300"}`}>
+                  {useDifferentBilling && (
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-sm font-medium text-gray-700">Usa un indirizzo di fatturazione diverso</span>
               </div>
 
-              <div className="border-t border-gray-200 pt-3 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Subtotale</span>
-                  <span className="text-gray-900">{formatMoney(subtotalCents, currency)}</span>
-                </div>
-
-                {discountCents > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-green-600 font-medium">✨ Sconto</span>
-                    <span className="text-green-600 font-semibold">-{formatMoney(discountCents, currency)}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Spedizione</span>
-                  <span className="text-gray-900">{formatMoney(shippingToApply, currency)}</span>
-                </div>
-
-                <div className="flex justify-between text-base font-semibold pt-3 border-t border-gray-200">
-                  <span>Totale</span>
-                  <span className="text-lg">{formatMoney(totalToPayCents, currency)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="max-w-6xl mx-auto px-4 pb-8">
-          <div className="lg:grid lg:grid-cols-2 lg:gap-12">
-            
-            <div>
-              <form onSubmit={handleSubmit} className="space-y-5">
-
-                <div className="shopify-section">
-                  <h2 className="shopify-section-title">{geo.labels.contacts}</h2>
-                  
-                  <div>
-                    <label className="shopify-label">{geo.labels.email}</label>
-                    <input
-                      type="email"
-                      name="email"
-                      value={customer.email}
-                      onChange={handleChange}
-                      className="shopify-input"
-                      placeholder="mario.rossi@esempio.com"
+              {useDifferentBilling && (
+                <SectionCard title={geo.labels.billing}>
+                  <div className="space-y-3">
+                    <FloatingSelect
+                      label={geo.labels.country}
+                      value={billingAddress.countryCode}
+                      onChange={(e) => setBillingAddress(prev => ({ ...prev, countryCode: e.target.value }))}
                       required
-                      autoComplete="email"
-                    />
-                  </div>
-
-                  <div className="flex items-start gap-2 mt-4">
-                    <input 
-                      type="checkbox" 
-                      id="emailUpdates" 
-                      className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
-                    />
-                    <label htmlFor="emailUpdates" className="text-xs text-gray-600 leading-relaxed">
-                      {geo.labels.emailUpdates}
-                    </label>
-                  </div>
-                </div>
-
-                <div className="shopify-section">
-                  <h2 className="shopify-section-title">{geo.labels.delivery}</h2>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <label className="shopify-label">{geo.labels.country}</label>
-                      <select
-                        name="countryCode"
-                        value={customer.countryCode}
-                        onChange={handleChange}
-                        className="shopify-input"
-                        required
-                      >
-                        <option value="IT">Italia</option>
-                        <option value="FR">Francia</option>
-                        <option value="DE">Germania</option>
-                        <option value="ES">Spagna</option>
-                      </select>
-                    </div>
+                    >
+                      <option value="IT">🇮🇹 Italia</option>
+                      <option value="FR">🇫🇷 Francia</option>
+                      <option value="DE">🇩🇪 Germania</option>
+                      <option value="ES">🇪🇸 Spagna</option>
+                    </FloatingSelect>
 
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="shopify-label">{geo.labels.firstName}</label>
-                        <input
-                          type="text"
-                          name="firstName"
-                          value={firstName}
-                          onChange={(e) => {
-                            setCustomer(prev => ({
-                              ...prev,
-                              fullName: `${e.target.value} ${lastName}`.trim()
-                            }))
-                          }}
-                          className="shopify-input"
-                          placeholder="Mario"
-                          required
-                          autoComplete="given-name"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="shopify-label">{geo.labels.lastName}</label>
-                        <input
-                          type="text"
-                          name="lastName"
-                          value={lastName}
-                          onChange={(e) => {
-                            setCustomer(prev => ({
-                              ...prev,
-                              fullName: `${firstName} ${e.target.value}`.trim()
-                            }))
-                          }}
-                          className="shopify-input"
-                          placeholder="Rossi"
-                          required
-                          autoComplete="family-name"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="shopify-label">{geo.labels.company}</label>
-                      <input
+                      <FloatingInput
+                        label={geo.labels.firstName}
                         type="text"
-                        className="shopify-input"
-                        placeholder="Nome azienda"
-                        autoComplete="organization"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="shopify-label">{geo.labels.address}</label>
-                      <input
-                        ref={addressInputRef}
-                        type="text"
-                        name="address1"
-                        value={customer.address1}
-                        onChange={handleChange}
-                        className="shopify-input"
-                        placeholder="Via Roma 123"
+                        value={billingFirstName}
+                        onChange={(e) => setBillingAddress(prev => ({ ...prev, fullName: `${e.target.value} ${billingLastName}`.trim() }))}
+                        placeholder="Mario"
                         required
-                        autoComplete="address-line1"
                       />
-                    </div>
-
-                    <div>
-                      <label className="shopify-label">{geo.labels.address2}</label>
-                      <input
+                      <FloatingInput
+                        label={geo.labels.lastName}
                         type="text"
-                        name="address2"
-                        value={customer.address2}
-                        onChange={handleChange}
-                        className="shopify-input"
-                        placeholder="Scala B, Piano 3"
-                        autoComplete="address-line2"
+                        value={billingLastName}
+                        onChange={(e) => setBillingAddress(prev => ({ ...prev, fullName: `${billingFirstName} ${e.target.value}`.trim() }))}
+                        placeholder="Rossi"
+                        required
                       />
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="shopify-label">{geo.labels.postalCode}</label>
-                        <input
+                    <FloatingInput
+                      label={geo.labels.address}
+                      type="text"
+                      value={billingAddress.address1}
+                      onChange={(e) => setBillingAddress(prev => ({ ...prev, address1: e.target.value }))}
+                      placeholder="Via Roma 123"
+                      required
+                    />
+
+                    <div className="grid grid-cols-5 gap-3">
+                      <div className="col-span-2">
+                        <FloatingInput
+                          label={geo.labels.postalCode}
                           type="text"
-                          name="postalCode"
-                          value={customer.postalCode}
-                          onChange={handleChange}
-                          className="shopify-input"
+                          value={billingAddress.postalCode}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, postalCode: e.target.value }))}
                           placeholder="00100"
                           required
-                          autoComplete="postal-code"
                         />
                       </div>
-
-                      <div className="col-span-2">
-                        <label className="shopify-label">{geo.labels.city}</label>
-                        <input
+                      <div className="col-span-3">
+                        <FloatingInput
+                          label={geo.labels.city}
                           type="text"
-                          name="city"
-                          value={customer.city}
-                          onChange={handleChange}
-                          className="shopify-input"
+                          value={billingAddress.city}
+                          onChange={(e) => setBillingAddress(prev => ({ ...prev, city: e.target.value }))}
                           placeholder="Roma"
                           required
-                          autoComplete="address-level2"
                         />
                       </div>
                     </div>
 
-                    <div>
-                      <label className="shopify-label">{geo.labels.province}</label>
-                      <input
-                        type="text"
-                        name="province"
-                        value={customer.province}
-                        onChange={handleChange}
-                        className="shopify-input"
-                        placeholder="RM"
-                        required
-                        autoComplete="address-level1"
-                      />
-                    </div>
+                    <FloatingInput
+                      label={geo.labels.province}
+                      type="text"
+                      value={billingAddress.province}
+                      onChange={(e) => setBillingAddress(prev => ({ ...prev, province: e.target.value }))}
+                      placeholder="RM"
+                      required
+                    />
+                  </div>
+                </SectionCard>
+              )}
 
-                    <div>
-                      <label className="shopify-label">{geo.labels.phone}</label>
-                      <input
-                        type="tel"
-                        name="phone"
-                        value={customer.phone}
-                        onChange={handleChange}
-                        className="shopify-input"
-                        placeholder="+39 123 456 7890"
-                        required
-                        autoComplete="tel"
-                      />
+              {/* PAGAMENTO */}
+              <SectionCard title={geo.labels.payment}>
+                {/* Payment method icons */}
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  {[
+                    { text: "VISA", color: "#1A1F71" },
+                    { text: "MC", isIcon: true },
+                    { text: "AMEX", color: "#006FCF" },
+                  ].map((card, i) => (
+                    <div key={i} className="h-7 px-2.5 bg-white border border-gray-200 rounded-lg flex items-center gap-1 shadow-xs">
+                      {card.isIcon ? (
+                        <>
+                          <span className="text-[10px] font-black" style={{ color: "#EB001B" }}>●</span>
+                          <span className="text-[10px] font-black -ml-1.5" style={{ color: "#FF5F00" }}>●</span>
+                        </>
+                      ) : (
+                        <span className="text-[11px] font-black" style={{ color: card.color }}>{card.text}</span>
+                      )}
                     </div>
-
-                    <div className="flex items-start gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="saveInfo" 
-                        className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
-                      />
-                      <label htmlFor="saveInfo" className="text-xs text-gray-600 leading-relaxed">
-                        {geo.labels.saveInfo}
-                      </label>
-                    </div>
+                  ))}
+                  <div className="ml-auto flex items-center gap-1.5 text-[11px] text-gray-400">
+                    <svg className="w-3.5 h-3.5 text-emerald-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                    </svg>
+                    <span className="font-medium">SSL · 3D Secure</span>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                  <input 
-                    type="checkbox" 
-                    id="differentBilling" 
-                    checked={useDifferentBilling}
-                    onChange={(e) => setUseDifferentBilling(e.target.checked)}
-                    className="w-4 h-4 mt-0.5 flex-shrink-0 rounded" 
-                  />
-                  <label htmlFor="differentBilling" className="text-sm text-gray-700 leading-relaxed cursor-pointer font-medium">
-                    Usa un indirizzo di fatturazione diverso
-                  </label>
-                </div>
-
-                {useDifferentBilling && (
-                  <div className="shopify-section">
-                    <h2 className="shopify-section-title">{geo.labels.billing}</h2>
-                    
-                    <div className="space-y-4">
-                      <div>
-                        <label className="shopify-label">{geo.labels.country}</label>
-                        <select
-                          value={billingAddress.countryCode}
-                          onChange={(e) => setBillingAddress(prev => ({ ...prev, countryCode: e.target.value }))}
-                          className="shopify-input"
-                          required
-                        >
-                          <option value="IT">Italia</option>
-                          <option value="FR">Francia</option>
-                          <option value="DE">Germania</option>
-                          <option value="ES">Spagna</option>
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="shopify-label">{geo.labels.firstName}</label>
-                          <input
-                            type="text"
-                            value={billingFirstName}
-                            onChange={(e) => {
-                              setBillingAddress(prev => ({
-                                ...prev,
-                                fullName: `${e.target.value} ${billingLastName}`.trim()
-                              }))
-                            }}
-                            className="shopify-input"
-                            placeholder="Mario"
-                            required
-                          />
-                        </div>
-
-                        <div>
-                          <label className="shopify-label">{geo.labels.lastName}</label>
-                          <input
-                            type="text"
-                            value={billingLastName}
-                            onChange={(e) => {
-                              setBillingAddress(prev => ({
-                                ...prev,
-                                fullName: `${billingFirstName} ${e.target.value}`.trim()
-                              }))
-                            }}
-                            className="shopify-input"
-                            placeholder="Rossi"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="shopify-label">{geo.labels.address}</label>
-                        <input
-                          type="text"
-                          value={billingAddress.address1}
-                          onChange={(e) => setBillingAddress(prev => ({ ...prev, address1: e.target.value }))}
-                          className="shopify-input"
-                          placeholder="Via Roma 123"
-                          required
-                        />
-                      </div>
-
-                      <div>
-                        <label className="shopify-label">{geo.labels.address2}</label>
-                        <input
-                          type="text"
-                          value={billingAddress.address2}
-                          onChange={(e) => setBillingAddress(prev => ({ ...prev, address2: e.target.value }))}
-                          className="shopify-input"
-                          placeholder="Scala B, Piano 3"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3">
-                        <div>
-                          <label className="shopify-label">{geo.labels.postalCode}</label>
-                          <input
-                            type="text"
-                            value={billingAddress.postalCode}
-                            onChange={(e) => setBillingAddress(prev => ({ ...prev, postalCode: e.target.value }))}
-                            className="shopify-input"
-                            placeholder="00100"
-                            required
-                          />
-                        </div>
-
-                        <div className="col-span-2">
-                          <label className="shopify-label">{geo.labels.city}</label>
-                          <input
-                            type="text"
-                            value={billingAddress.city}
-                            onChange={(e) => setBillingAddress(prev => ({ ...prev, city: e.target.value }))}
-                            className="shopify-input"
-                            placeholder="Roma"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="shopify-label">{geo.labels.province}</label>
-                        <input
-                          type="text"
-                          value={billingAddress.province}
-                          onChange={(e) => setBillingAddress(prev => ({ ...prev, province: e.target.value }))}
-                          className="shopify-input"
-                          placeholder="RM"
-                          required
-                        />
-                      </div>
-                    </div>
+                {isCalculatingShipping && (
+                  <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl mb-4">
+                    <svg className="animate-spin h-4 w-4 text-blue-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <p className="text-sm text-blue-700 font-medium">Preparazione pagamento...</p>
                   </div>
                 )}
 
-                {isFormValid() && (
-                  <>
-                    <div className="shopify-section">
-                      <h2 className="shopify-section-title">{geo.labels.shippingMethod}</h2>
-                      <div className="border border-gray-300 rounded-xl p-4 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">Spedizione BRT Express</p>
-                          <p className="text-xs text-gray-600 mt-1">Consegna in 24/48 ore</p>
-                        </div>
-                        <span className="text-sm font-bold text-gray-900">€5,90</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
-                      <div className="flex items-start gap-4">
-                        <div className="flex -space-x-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            M
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            L
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-pink-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            A
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            2K+
-                          </div>
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-2xl">🎉</span>
-                            <p className="text-sm font-bold text-gray-900">
-                              Oltre 2.000+ clienti soddisfatti
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1 mb-1">
-                            {[...Array(5)].map((_, i) => (
-                              <svg key={i} className="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                              </svg>
-                            ))}
-                            <span className="text-xs font-semibold text-gray-700 ml-1">4.9/5</span>
-                            <span className="text-xs text-gray-500">(1.847 recensioni)</span>
-                          </div>
-                          <p className="text-xs text-gray-600">
-                            ✓ Ultima vendita: <strong>3 minuti fa</strong>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                {shippingError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl mb-4">
+                    <p className="text-sm text-red-700">{shippingError}</p>
+                  </div>
                 )}
 
-                <div className="shopify-section">
-                  <h2 className="shopify-section-title">{geo.labels.payment}</h2>
-                  
-                  <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#1A1F71]">VISA</span>
-                      </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#EB001B]">●</span>
-                        <span className="text-xs font-bold text-[#FF5F00]">●</span>
-                      </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-xs font-bold text-[#006FCF]">AMEX</span>
-                      </div>
-                      <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
-                        <span className="text-[10px] font-bold">
-                          <span className="text-[#003087]">Pay</span>
-                          <span className="text-[#009cde]">Pal</span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">SSL</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">3D Secure</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                      </svg>
-                      <span className="font-medium">PCI DSS</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-600 mb-4">
-                    🔒 I tuoi dati non vengono mai memorizzati. Transazione protetta.
-                  </p>
-                  
-                  {isCalculatingShipping && (
-                    <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                      <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      <p className="text-sm text-blue-800 font-medium">Calcolo in corso...</p>
-                    </div>
-                  )}
-
-                  {shippingError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl mb-4">
-                      <p className="text-sm text-red-700">{shippingError}</p>
-                    </div>
-                  )}
-
-                  {clientSecret && !isCalculatingShipping && (
-                    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-                      <PaymentElement 
-                        options={{
-                          fields: {
-                            billingDetails: {
-                              name: 'auto',
-                              email: 'never',
-                              phone: 'never',
-                              address: 'never'
-                            }
+                {clientSecret && !isCalculatingShipping && (
+                  <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
+                    <PaymentElement
+                      options={{
+                        fields: {
+                          billingDetails: {
+                            name: "auto",
+                            email: "never",
+                            phone: "never",
+                            address: "never",
                           },
-                          defaultValues: {
-                            billingDetails: {
-                              name: useDifferentBilling 
-                                ? billingAddress.fullName 
-                                : customer.fullName
-                            }
-                          }
-                        }}
-                      />
-                    </div>
-                  )}
+                        },
+                        defaultValues: {
+                          billingDetails: {
+                            name: useDifferentBilling ? billingAddress.fullName : customer.fullName,
+                          },
+                        },
+                      }}
+                    />
+                  </div>
+                )}
 
-                  {!clientSecret && !isCalculatingShipping && (
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
-                      <p className="text-sm text-gray-600 text-center">
-                        Compila tutti i campi per visualizzare i metodi di pagamento
-                      </p>
-                    </div>
-                  )}
-                </div>
+                {!clientSecret && !isCalculatingShipping && (
+                  <div className="p-5 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
+                    <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <p className="text-sm text-gray-400 font-medium">Compila tutti i campi per sbloccare il pagamento</p>
+                  </div>
+                )}
 
+                {/* Error */}
                 {error && (
-                  <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                      </svg>
-                      <p className="text-sm text-red-700 font-medium">{error}</p>
-                    </div>
+                  <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl mt-4">
+                    <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-sm text-red-700 font-medium">{error}</p>
                   </div>
                 )}
 
                 {success && (
-                  <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <p className="text-sm text-green-700 font-medium">Pagamento completato! Reindirizzamento...</p>
-                    </div>
+                  <div className="flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl mt-4">
+                    <svg className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-sm text-emerald-700 font-semibold">Pagamento completato! Reindirizzamento...</p>
                   </div>
                 )}
+              </SectionCard>
 
-                <button
-                  type="submit"
-                  disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
-                  className="shopify-btn"
-                >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Elaborazione...
-                    </span>
-                  ) : (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                      </svg>
-                      {geo.labels.pay}
-                    </span>
-                  )}
-                </button>
-
-                <div className="mt-6 space-y-3">
-                  <div className="flex items-start gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Garanzia Soddisfatti o Rimborsati</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        14 giorni per restituire il prodotto e ricevere un rimborso completo
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Spedizione Tracciata con BRT</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        Tracking via email per monitorare il pacco in tempo reale
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 bg-purple-50 rounded-xl border border-purple-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Assistenza Clienti Dedicata</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        Team disponibile 7 giorni su 7 via email o chat
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 text-center">
-                  <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
-                    <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+              {/* CTA BUTTON */}
+              <button
+                type="submit"
+                disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
+                className="w-full py-4 px-6 text-base font-semibold text-white rounded-2xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: loading || !clientSecret
+                    ? "#9ca3af"
+                    : "linear-gradient(135deg, #1d1d1f 0%, #3d3d3f 100%)",
+                  boxShadow: loading || !clientSecret ? "none" : "0 4px 20px rgba(0,0,0,0.2)",
+                }}
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Elaborazione...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                     </svg>
-                    <span>Crittografia SSL a 256-bit</span>
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Powered by Stripe • PCI DSS Level 1 Certified
-                  </p>
+                    {geo.labels.pay} · {formatMoney(totalToPayCents, currency)}
+                  </span>
+                )}
+              </button>
+
+              {/* Post-CTA trust */}
+              <div className="mt-4 space-y-2.5">
+                {[
+                  { icon: "✓", color: "text-emerald-600", title: "Garanzia 14 giorni", desc: "Reso gratuito, rimborso completo garantito" },
+                  { icon: "🚚", color: "text-blue-600", title: "Spedizione BRT Tracciata", desc: "Tracking via email in tempo reale" },
+                  { icon: "📞", color: "text-purple-600", title: "Assistenza 7/7", desc: "Supporto clienti via email o chat" },
+                ].map(({ icon, color, title, desc }) => (
+                  <div key={title} className="flex items-start gap-3 p-3 bg-white rounded-xl border border-gray-100 shadow-xs">
+                    <span className={`text-base flex-shrink-0 ${color}`}>{icon}</span>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-800">{title}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-center text-[11px] text-gray-400 mt-4 flex items-center justify-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                </svg>
+                Crittografia SSL 256-bit · Powered by Stripe · PCI DSS Level 1
+              </p>
+            </form>
+          </div>
+
+          {/* ── RIGHT COLUMN (desktop) ─────────────────────────────── */}
+          <div className="hidden lg:block">
+            <div className="sticky top-20">
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-5">Riepilogo ordine</h3>
+                <OrderSummary
+                  cart={cart}
+                  subtotalCents={subtotalCents}
+                  discountCents={discountCents}
+                  shippingToApply={shippingToApply}
+                  totalToPayCents={totalToPayCents}
+                  currency={currency}
+                />
+              </div>
+
+              <TrustBadges />
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-semibold text-gray-700">Metodi accettati</span>
                 </div>
-
-              </form>
-            </div>
-
-            <div className="hidden lg:block">
-              <div className="sticky top-24">
-                <div className="shopify-section">
-                  <h3 className="shopify-section-title">Riepilogo ordine</h3>
-
-                  {discountCents > 0 && (
-                    <div className="mb-6 p-5 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl shadow-lg">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center shadow-md">
-                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
-                          </svg>
-                        </div>
-                        <h3 className="text-lg font-extrabold text-gray-900">🎉 Stai Risparmiando!</h3>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-700 font-semibold">💸 Sconto Prodotti</span>
-                          <span className="text-xl font-extrabold text-green-600">-{formatMoney(discountCents, currency)}</span>
-                        </div>
-                        <div className="pt-3 border-t-2 border-green-400 mt-3">
-                          <div className="flex justify-between items-center">
-                            <span className="text-base font-extrabold text-gray-900">Risparmio Totale</span>
-                            <span className="text-2xl font-black text-green-600">
-                              -{formatMoney(discountCents, currency)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[
+                    <span key="visa" className="text-xs font-black text-[#1A1F71]">VISA</span>,
+                    <><span key="mc1" className="text-xs font-black text-[#EB001B]">●</span><span key="mc2" className="text-xs font-black text-[#FF5F00] -ml-1">●</span></>,
+                    <span key="amex" className="text-xs font-black text-[#006FCF]">AMEX</span>,
+                    <span key="apple" className="text-[11px] font-bold text-gray-800"> Pay</span>,
+                    <span key="google" className="text-[11px] font-bold"><span className="text-blue-500">G</span><span className="text-red-500">o</span><span className="text-amber-500">o</span><span className="text-blue-500">g</span><span className="text-green-500">l</span><span className="text-red-500">e</span> Pay</span>,
+                  ].map((el, i) => (
+                    <div key={i} className="h-7 px-2.5 bg-gray-50 border border-gray-200 rounded-lg flex items-center gap-0.5 shadow-xs">
+                      {el}
                     </div>
-                  )}
-
-                  <div className="space-y-4 mb-6">
-                    {cart.items.map((item, idx) => {
-                      const originalPrice = item.priceCents || 0
-                      const currentPrice = item.linePriceCents || 0
-                      const expectedTotal = originalPrice * item.quantity
-                      const discountAmount = expectedTotal - currentPrice
-                      const isFullyFree = currentPrice === 0 && originalPrice > 0
-                      const isDiscounted = discountAmount > 0
-                      
-                      return (
-                        <div key={idx} className="flex gap-3 relative">
-                          {isFullyFree && (
-                            <div className="absolute -top-3 left-16 z-10 bg-gradient-to-r from-red-500 to-pink-600 text-white text-sm font-extrabold px-3 py-1.5 rounded-full shadow-xl animate-pulse">
-                              3x2 GRATIS 🎁
-                            </div>
-                          )}
-                          {!isFullyFree && isDiscounted && (
-                            <div className="absolute -top-2 left-16 z-10 bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow-lg">
-                              SCONTO ATTIVO
-                            </div>
-                          )}
-                          
-                          {item.image && (
-                            <div className="relative flex-shrink-0">
-                              <img
-                                src={item.image}
-                                alt={item.title}
-                                className="w-20 h-20 object-cover rounded-xl border border-gray-200"
-                              />
-                              <span className="absolute -top-2 -right-2 bg-gray-700 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-semibold shadow-md">
-                                {item.quantity}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-900">{item.title}</p>
-                            {item.variantTitle && (
-                              <p className="text-xs text-gray-500 mt-1">{item.variantTitle}</p>
-                            )}
-                            {isDiscounted && (
-                              <div className="flex items-center gap-2 mt-2">
-                                <span className="text-sm line-through text-gray-400 font-medium">
-                                  {formatMoney(expectedTotal, currency)}
-                                </span>
-                                {isFullyFree ? (
-                                  <span className="text-sm font-extrabold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg">
-                                    -100% GRATIS 🔥
-                                  </span>
-                                ) : (
-                                  <span className="text-sm font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
-                                    -{formatMoney(discountAmount, currency)}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end justify-center flex-shrink-0">
-                            {isFullyFree ? (
-                              <>
-                                <p className="text-sm line-through text-gray-400">
-                                  {formatMoney(expectedTotal, currency)}
-                                </p>
-                                <p className="text-xl font-extrabold text-green-600">
-                                  GRATIS ✨
-                                </p>
-                              </>
-                            ) : isDiscounted ? (
-                              <>
-                                <p className="text-sm line-through text-gray-400">
-                                  {formatMoney(expectedTotal, currency)}
-                                </p>
-                                <p className="text-base font-bold text-green-600">
-                                  {formatMoney(currentPrice, currency)}
-                                </p>
-                              </>
-                            ) : (
-                              <p className="text-sm font-semibold text-gray-900">
-                                {formatMoney(currentPrice, currency)}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  <div className="border-t border-gray-200 pt-4 space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Subtotale</span>
-                      <span className="text-gray-900 font-medium">{formatMoney(subtotalCents, currency)}</span>
-                    </div>
-
-                    {discountCents > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-green-600 font-medium">✨ Sconto</span>
-                        <span className="text-green-600 font-semibold">-{formatMoney(discountCents, currency)}</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
-                    </div>
-
-                    <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
-                      <span>Totale</span>
-                      <span className="text-xl">{formatMoney(totalToPayCents, currency)}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
-
           </div>
         </div>
+      </div>
+
+      {/* ── MOBILE STICKY FOOTER ───────────────────────────────────────── */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-gray-100 px-4 py-3 safe-bottom">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-500 font-medium">Totale ordine</span>
+          <span className="text-base font-black text-gray-900">{formatMoney(totalToPayCents, currency)}</span>
+        </div>
+        <TrustBadges />
       </div>
     </>
   )
 }
 
+// ── PAGE WRAPPER ──────────────────────────────────────────────────────
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""
@@ -1934,6 +1714,8 @@ function CheckoutPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
+  const [totalCents, setTotalCents] = useState(1000)
+  const [currency, setCurrency] = useState("eur")
 
   useEffect(() => {
     async function load() {
@@ -1947,50 +1729,45 @@ function CheckoutPageContent() {
         setLoading(true)
         setError(null)
 
-        const res = await fetch(
-          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
-        )
+        const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
         const data: CartSessionResponse & { error?: string } = await res.json()
 
         if (!res.ok || (data as any).error) {
-          setError(
-            data.error || "Errore nel recupero del carrello. Riprova dal sito.",
-          )
+          setError(data.error || "Errore nel recupero del carrello.")
           setLoading(false)
           return
         }
 
         setCart(data)
 
-        try {
-          const pkRes = await fetch('/api/stripe-status')
-          
-          if (!pkRes.ok) {
-            throw new Error('API stripe-status non disponibile')
-          }
-          
-          const pkData = await pkRes.json()
+        // Compute total for Elements
+        const subtotal = typeof data.subtotalCents === "number"
+          ? data.subtotalCents
+          : data.items.reduce((s, i) => s + (i.linePriceCents ?? i.priceCents ?? 0), 0)
+        const shopifyTotal = typeof data.totalCents === "number" ? data.totalCents : subtotal
+        const discount = Math.max(0, subtotal - shopifyTotal)
+        const total = subtotal - discount + 590
+        setTotalCents(total)
+        setCurrency((data.currency || "eur").toLowerCase())
 
+        try {
+          const pkRes = await fetch("/api/stripe-status")
+          if (!pkRes.ok) throw new Error("API stripe-status non disponibile")
+          const pkData = await pkRes.json()
           if (pkData.publishableKey) {
-            console.log('[Checkout] ✅ Publishable key caricata')
-            console.log('[Checkout] ✅ Account:', pkData.accountLabel)
             setStripePromise(loadStripe(pkData.publishableKey))
           } else {
-            throw new Error('PublishableKey non ricevuta da API')
+            throw new Error("PublishableKey non ricevuta")
           }
         } catch (err) {
-          console.error('[Checkout] ❌ Errore caricamento stripe-status:', err)
-          setError('Impossibile inizializzare il sistema di pagamento. Riprova.')
+          setError("Impossibile inizializzare il sistema di pagamento.")
           setLoading(false)
           return
         }
 
         setLoading(false)
       } catch (err: any) {
-        console.error("Errore checkout:", err)
-        setError(
-          err?.message || "Errore imprevisto nel caricamento del checkout.",
-        )
+        setError(err?.message || "Errore imprevisto nel caricamento.")
         setLoading(false)
       }
     }
@@ -2000,10 +1777,10 @@ function CheckoutPageContent() {
 
   if (loading || !stripePromise) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout…</p>
+          <div className="w-10 h-10 mx-auto mb-4 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-gray-500 font-medium">Caricamento checkout...</p>
         </div>
       </div>
     )
@@ -2011,43 +1788,62 @@ function CheckoutPageContent() {
 
   if (error || !cart) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-4 p-8 bg-white rounded-2xl shadow-lg border border-gray-200">
-          <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <h1 className="text-xl font-bold text-gray-900">Impossibile caricare il checkout</h1>
-          <p className="text-sm text-gray-600">{error}</p>
-          <p className="text-xs text-gray-500">
-            Ritorna al sito e riprova ad aprire il checkout.
-          </p>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="max-w-sm w-full text-center p-8 bg-white rounded-2xl shadow-sm border border-gray-100">
+          <div className="w-14 h-14 mx-auto mb-4 bg-red-50 rounded-full flex items-center justify-center">
+            <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h1 className="text-lg font-bold text-gray-900 mb-2">Impossibile caricare il checkout</h1>
+          <p className="text-sm text-gray-500 mb-1">{error}</p>
+          <p className="text-xs text-gray-400">Ritorna al sito e riprova ad aprire il checkout.</p>
         </div>
       </div>
     )
   }
 
-  const options = {
-    mode: 'payment' as const,
-    amount: 1000,
-    currency: (cart.currency || 'eur').toLowerCase(),
-    paymentMethodTypes: ['card'],
+  const elementsOptions = {
+    mode: "payment" as const,
+    amount: totalCents,
+    currency,
+    // ✅ FIX: rimuovere paymentMethodTypes abilita automatic payment methods
+    // che include Apple Pay, Google Pay e carta
     appearance: {
       theme: "stripe" as const,
       variables: {
-        colorPrimary: "#2C6ECB",
+        colorPrimary: "#1d1d1f",
         colorBackground: "#ffffff",
-        colorText: "#333333",
-        colorDanger: "#df1b41",
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        spacingUnit: '4px',
+        colorText: "#1d1d1f",
+        colorDanger: "#ef4444",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif',
+        spacingUnit: "4px",
         borderRadius: "10px",
-        fontSizeBase: '16px',
+        fontSizeBase: "16px",
+      },
+      rules: {
+        ".Input": {
+          border: "1px solid #e5e7eb",
+          boxShadow: "none",
+          padding: "12px 14px",
+        },
+        ".Input:focus": {
+          border: "1px solid #1d1d1f",
+          boxShadow: "0 0 0 2px rgba(29, 29, 31, 0.08)",
+        },
+        ".Label": {
+          fontSize: "12px",
+          fontWeight: "500",
+          color: "#6b7280",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+        },
       },
     },
   }
 
   return (
-    <Elements stripe={stripePromise} options={options}>
+    <Elements stripe={stripePromise} options={elementsOptions}>
       <CheckoutInner cart={cart} sessionId={sessionId} />
     </Elements>
   )
@@ -2057,11 +1853,8 @@ export default function CheckoutPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-            <p className="text-sm text-gray-600 font-medium">Caricamento…</p>
-          </div>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="w-10 h-10 border-2 border-gray-900 border-t-transparent rounded-full animate-spin" />
         </div>
       }
     >

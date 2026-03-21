@@ -196,7 +196,12 @@ export async function POST(req: NextRequest) {
       description,
       ...(email && { receipt_email: email }),
       statement_descriptor_suffix: statementDescriptorSuffix,
-      payment_method_types: ["card"],
+      // ✅ FIX: automatic_payment_methods abilita Apple Pay, Google Pay e carta
+      // senza bloccare con payment_method_types: ["card"]
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: "never", // evita redirect (Klarna ecc.) — solo wallet + carta
+      },
       payment_method_options: {
         card: {
           request_three_d_secure: "automatic",
