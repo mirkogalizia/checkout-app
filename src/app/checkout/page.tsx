@@ -1154,8 +1154,8 @@ function CheckoutInner({
           <img
             src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
             alt="Logo"
-            className="h-8 object-contain"
-            style={{ maxWidth: "140px" }}
+            className="h-12 object-contain drop-shadow-sm"
+            style={{ maxWidth: "200px" }}
           />
 
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 rounded-full border border-emerald-100">
