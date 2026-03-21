@@ -970,76 +970,72 @@ function CheckoutInner({
   }
 
   // ── Apple Pay / Google Pay express confirm ────────────────────────
+  // ── Apple Pay / Google Pay express confirm ────────────────────────
+  // Flusso corretto per ExpressCheckoutElement:
+  // 1. L'utente apre il sheet Apple Pay → vede i suoi dati salvati
+  // 2. Conferma con Touch ID / Face ID → scatta onConfirm con TUTTI i dati
+  // 3. Noi creiamo il PI con quei dati e confermiamo il pagamento
+  // L'utente non deve compilare NULLA nel form.
   async function handleExpressConfirm(event: any) {
     if (!stripe || !elements) return
 
-    const shippingAddr = event.shippingAddress
-    const name = event.billingDetails?.name || customer.fullName || ""
-    const email = event.billingDetails?.email || customer.email || ""
-    const phone = event.billingDetails?.phone || customer.phone || ""
+    // event.shippingDetails = indirizzo scelto nel wallet Apple Pay
+    // event.billingDetails  = dati carta/contatto del wallet
+    const sd = event.shippingDetails  // { name?, address: { line1, city, postal_code, state, country } }
+    const bd = event.billingDetails   // { name?, email?, phone?, address? }
 
-    // If we have express payment data and no clientSecret yet, create PI first
-    let secret = clientSecret
-    if (!secret) {
-      try {
-        const piRes = await fetch("/api/payment-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            amountCents: totalToPayCents,
-            customer: {
-              fullName: name,
-              email,
-              phone,
-              address1: shippingAddr?.address?.line1 || "",
-              address2: shippingAddr?.address?.line2 || "",
-              city: shippingAddr?.address?.city || "",
-              postalCode: shippingAddr?.address?.postal_code || "",
-              province: shippingAddr?.address?.state || "",
-              countryCode: shippingAddr?.address?.country || "IT",
-            },
-          }),
-        })
-        const piData = await piRes.json()
-        if (!piRes.ok || !piData.clientSecret) {
-          event.paymentFailed?.({ reason: "fail" })
-          return
-        }
-        secret = piData.clientSecret
-        setClientSecret(secret)
-      } catch {
+    // Costruisci i dati cliente dal wallet — nessun fallback sul form
+    const name        = bd?.name          || sd?.name          || ""
+    const email       = bd?.email         || ""
+    const phone       = bd?.phone         || ""
+    const address1    = sd?.address?.line1        || bd?.address?.line1        || ""
+    const address2    = sd?.address?.line2        || bd?.address?.line2        || ""
+    const city        = sd?.address?.city         || bd?.address?.city         || ""
+    const postalCode  = sd?.address?.postal_code  || bd?.address?.postal_code  || ""
+    const province    = sd?.address?.state        || bd?.address?.state        || ""
+    const countryCode = sd?.address?.country      || bd?.address?.country      || "IT"
+
+    console.log("[ApplePay] ✅ Dati ricevuti:", { name, email, phone, address1, city, postalCode, province, countryCode })
+
+    try {
+      // Crea il PI con i dati reali del wallet
+      const piRes = await fetch("/api/payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          amountCents: totalToPayCents,
+          customer: { fullName: name, email, phone, address1, address2, city, postalCode, province, countryCode },
+        }),
+      })
+      const piData = await piRes.json()
+
+      if (!piRes.ok || !piData.clientSecret) {
+        console.error("[ApplePay] ❌ Errore creazione PI:", piData.error)
         event.paymentFailed?.({ reason: "fail" })
         return
       }
-    }
 
-    const { error } = await stripe.confirmPayment({
-      elements,
-      clientSecret: secret!,
-      confirmParams: {
-        return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
-        payment_method_data: {
-          billing_details: {
-            name,
-            email,
-            phone,
-            ...(shippingAddr?.address && {
-              address: {
-                line1: shippingAddr.address.line1 || "",
-                line2: shippingAddr.address.line2 || undefined,
-                city: shippingAddr.address.city || "",
-                postal_code: shippingAddr.address.postal_code || "",
-                country: shippingAddr.address.country || "IT",
-              },
-            }),
-          },
+      setClientSecret(piData.clientSecret)
+
+      // ✅ Usa stripe.confirmPayment con il clientSecret appena creato.
+      // NON passare payment_method_data manualmente: l'Elements gestisce
+      // internamente il token Apple Pay criptato di questo session.
+      const { error } = await stripe.confirmPayment({
+        elements,
+        clientSecret: piData.clientSecret,
+        confirmParams: {
+          return_url: `${window.location.origin}/thank-you?sessionId=${sessionId}`,
         },
-      },
-    })
+        redirect: "if_required",
+      })
 
-    if (error) {
-      console.error("Express payment error:", error)
+      if (error) {
+        console.error("[ApplePay] ❌ Errore pagamento:", error.message)
+        event.paymentFailed?.({ reason: "fail" })
+      }
+    } catch (err) {
+      console.error("[ApplePay] ❌ Eccezione:", err)
       event.paymentFailed?.({ reason: "fail" })
     }
   }
@@ -1217,6 +1213,17 @@ function CheckoutInner({
                       maxColumns: 1,
                       maxRows: 3,
                       overflow: "auto",
+                    },
+                    // Apple Pay mostra automaticamente l'indirizzo salvato nel wallet.
+                    // shippingAddressCollection fa sì che l'utente possa sceglierlo/modificarlo.
+                    // emailRequired e phoneNumberCollection chiedono i campi contatto.
+                    // L'utente NON compila nulla nel form — tutto viene dal wallet.
+                    shippingAddressCollection: {
+                      allowedCountries: ["IT", "FR", "DE", "ES", "PT", "NL", "AT", "BE", "CH"],
+                    },
+                    emailRequired: true,
+                    phoneNumberCollection: {
+                      enabled: true,
                     },
                   }}
                 />
