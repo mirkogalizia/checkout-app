@@ -1023,7 +1023,7 @@ function CheckoutInner({
       // ✅ Usa stripe.confirmPayment con il clientSecret appena creato.
       // NON passare payment_method_data manualmente: l'Elements gestisce
       // internamente il token Apple Pay criptato di questo session.
-      const { error } = await stripe.confirmPayment({
+      const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         clientSecret: piData.clientSecret,
         confirmParams: {
@@ -1035,6 +1035,8 @@ function CheckoutInner({
       if (error) {
         console.error("[ApplePay] ❌ Errore pagamento:", error.message)
         event.paymentFailed?.({ reason: "fail" })
+      } else if (paymentIntent && paymentIntent.status === "succeeded") {
+        window.location.href = `/thank-you?sessionId=${sessionId}`
       }
     } catch (err) {
       console.error("[ApplePay] ❌ Eccezione:", err)
