@@ -660,8 +660,8 @@ async function createShopifyOrder({
           gateway:       `Stripe (${stripeAccountLabel})`,
           authorization: paymentIntent.id,
         }],
-        note: `Checkout custom - Session: ${sessionId} - Stripe Account: ${stripeAccountLabel} - Payment Intent: ${paymentIntent.id}`,
-        tags: `checkout-custom,stripe-paid,${stripeAccountLabel},automated`,
+        note: `Checkout custom - Session: ${sessionId} - Stripe Account: ${stripeAccountLabel} - Payment Intent: ${paymentIntent.id} - Metodo: ${sessionData.paymentMethodType || "card"}`,
+        tags: `checkout-custom,stripe-paid,${stripeAccountLabel},automated,${sessionData.paymentMethodType || "card"}`,
       },
     }
 

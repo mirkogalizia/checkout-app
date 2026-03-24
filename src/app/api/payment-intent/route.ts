@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     const amountCents = body?.amountCents as number | undefined
     const customerBody = (body?.customer || {}) as CustomerPayload
     const isExpressCheckout = body?.expressCheckout === true
+    const paymentMethodType = (body?.paymentMethodType as string) || (isExpressCheckout ? "express" : "card")
 
     if (!sessionId) {
       return NextResponse.json({ error: "sessionId mancante" }, { status: 400 })
@@ -260,6 +261,7 @@ export async function POST(req: NextRequest) {
       currency: currency.toUpperCase(),
       shopifyOrderNumber: orderNumber,
       stripeAccountUsed: activeAccount.label,
+      paymentMethodType,
       updatedAt: new Date().toISOString(),
     }
 

@@ -1008,6 +1008,7 @@ function CheckoutInner({
           amountCents: totalToPayCents,
           customer: { fullName: name, email, phone, address1, address2, city, postalCode, province, countryCode },
           expressCheckout: true,
+          paymentMethodType: event.expressPaymentType || "express",
         }),
       })
       const piData = await piRes.json()
