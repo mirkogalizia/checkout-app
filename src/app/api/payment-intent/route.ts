@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     const sessionId = body?.sessionId as string | undefined
     const amountCents = body?.amountCents as number | undefined
     const customerBody = (body?.customer || {}) as CustomerPayload
+    const isExpressCheckout = body?.expressCheckout === true
 
     if (!sessionId) {
       return NextResponse.json({ error: "sessionId mancante" }, { status: 400 })
@@ -172,8 +173,11 @@ export async function POST(req: NextRequest) {
     const orderNumber = data.orderNumber || sessionId
     const description = `${orderNumber} | ${fullName || "Guest"}`
 
+    // Skip shipping sul PI per Express Checkout (Apple Pay/Google Pay):
+    // l'ExpressCheckoutElement lo manda automaticamente dal client con la publishable key,
+    // e Stripe rifiuta se è già stato settato con la secret key.
     let shipping: Stripe.PaymentIntentCreateParams.Shipping | undefined
-    if (fullName && address1 && city && postalCode) {
+    if (!isExpressCheckout && fullName && address1 && city && postalCode) {
       shipping = {
         name: fullName,
         ...(phone && { phone }),

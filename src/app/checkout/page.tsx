@@ -1007,6 +1007,7 @@ function CheckoutInner({
           sessionId,
           amountCents: totalToPayCents,
           customer: { fullName: name, email, phone, address1, address2, city, postalCode, province, countryCode },
+          expressCheckout: true,
         }),
       })
       const piData = await piRes.json()
@@ -1202,6 +1203,24 @@ function CheckoutInner({
                       phoneNumberRequired: true,
                       shippingAddressRequired: true,
                       emailRequired: true,
+                      shippingRates: [
+                        {
+                          id: "standard",
+                          displayName: "Spedizione Standard",
+                          amount: 590,
+                        },
+                      ],
+                    })
+                  }}
+                  onShippingAddressChange={(event) => {
+                    event.resolve({
+                      shippingRates: [
+                        {
+                          id: "standard",
+                          displayName: "Spedizione Standard",
+                          amount: 590,
+                        },
+                      ],
                     })
                   }}
                   onReady={(event) => {
