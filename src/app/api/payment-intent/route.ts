@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
       shippingCents: 0,
       totalCents: amountCents,
       currency: currency.toUpperCase(),
-      shopifyOrderNumber: orderNumber,
+      internalOrderRef: orderNumber,
       stripeAccountUsed: activeAccount.label,
       paymentMethodType,
       updatedAt: new Date().toISOString(),
