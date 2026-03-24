@@ -980,13 +980,13 @@ function CheckoutInner({
   async function handleExpressConfirm(event: any) {
     if (!stripe || !elements) return
 
-    // event.shippingDetails = indirizzo scelto nel wallet Apple Pay
+    // event.shippingAddress = indirizzo di spedizione scelto nel wallet Apple Pay
     // event.billingDetails  = dati carta/contatto del wallet
-    const sd = event.shippingDetails  // { name?, address: { line1, city, postal_code, state, country } }
+    const sd = event.shippingAddress  // { name?, address: { line1, city, postal_code, state, country } }
     const bd = event.billingDetails   // { name?, email?, phone?, address? }
 
-    // Costruisci i dati cliente dal wallet — nessun fallback sul form
-    const name        = bd?.name          || sd?.name          || ""
+    // Costruisci i dati cliente dal wallet — priorità a shipping (destinatario)
+    const name        = sd?.name          || bd?.name          || ""
     const email       = bd?.email         || ""
     const phone       = bd?.phone         || ""
     const address1    = sd?.address?.line1        || bd?.address?.line1        || ""
