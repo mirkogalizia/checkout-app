@@ -1576,6 +1576,13 @@ function CheckoutInner({
                   <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
                     <PaymentElement
                       options={{
+                        layout: {
+                          type: "accordion",
+                          defaultCollapsed: false,
+                          radios: false,
+                          spacedAccordionItems: false,
+                        },
+                        paymentMethodOrder: ["card"],
                         fields: {
                           billingDetails: {
                             name: "auto",
