@@ -1197,6 +1197,13 @@ function CheckoutInner({
                 <ExpressCheckoutElement
                   id="express-checkout-element"
                   onConfirm={handleExpressConfirm}
+                  onClick={(event) => {
+                    event.resolve({
+                      phoneNumberRequired: true,
+                      shippingAddressRequired: true,
+                      emailRequired: true,
+                    })
+                  }}
                   onReady={(event) => {
                     const available = event.availablePaymentMethods
                     setExpressPaymentReady(!!(available?.applePay || available?.googlePay))
