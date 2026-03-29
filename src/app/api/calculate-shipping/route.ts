@@ -6,6 +6,7 @@ import { getConfig } from "@/lib/config"
 const COLLECTION = "cartSessions"
 
 type Destination = {
+  address1?: string
   city: string
   province: string
   postalCode: string
@@ -189,11 +190,13 @@ async function calculateShippingWithAdmin({
           draft_order: {
             line_items: lineItems,
             shipping_address: {
-              address1: " ",
-              city: destination.city || " ",
-              province: destination.province || undefined,
+              first_name: "Customer",
+              last_name: "Checkout",
+              address1: destination.address1 || "Indirizzo 1",
+              city: destination.city || "Roma",
+              province: destination.province || "",
               country_code: destination.countryCode || "IT",
-              zip: destination.postalCode || undefined,
+              zip: destination.postalCode || "00100",
             },
             use_customer_default_address: false,
           },

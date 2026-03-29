@@ -487,11 +487,19 @@ function OrderSummary({
         )}
         <div className="flex justify-between text-gray-500">
           <span>Spedizione</span>
-          <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
+          {shippingToApply > 0 ? (
+            <span className="text-gray-900 font-medium">{formatMoney(shippingToApply, currency)}</span>
+          ) : (
+            <span className="text-gray-400 text-xs italic">Inserisci indirizzo</span>
+          )}
         </div>
         <div className="flex justify-between pt-3 border-t border-gray-100">
           <span className="text-base font-bold text-gray-900">Totale</span>
-          <span className="text-xl font-black text-gray-900">{formatMoney(totalToPayCents, currency)}</span>
+          {shippingToApply > 0 ? (
+            <span className="text-xl font-black text-gray-900">{formatMoney(totalToPayCents, currency)}</span>
+          ) : (
+            <span className="text-xl font-black text-gray-900">{formatMoney(subtotalCents - discountCents, currency)}</span>
+          )}
         </div>
       </div>
     </>
@@ -630,8 +638,7 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  const SHIPPING_COST_CENTS = 590
-  const shippingToApply = SHIPPING_COST_CENTS
+  const shippingToApply = calculatedShippingCents
   const totalToPayCents = subtotalCents - discountCents + shippingToApply
 
   const firstName = customer.fullName.split(" ")[0] || ""
@@ -837,13 +844,29 @@ function CheckoutInner({
         setShippingError(null)
 
         try {
-          const flatShippingCents = 590
-          setCalculatedShippingCents(flatShippingCents)
+          // Chiedi a Shopify le tariffe di spedizione reali
+          const shippingRes = await fetch("/api/calculate-shipping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              destination: {
+                address1: customer.address1,
+                city: customer.city,
+                province: customer.province,
+                postalCode: customer.postalCode,
+                countryCode: customer.countryCode || "IT",
+              },
+            }),
+          })
+          const shippingData = await shippingRes.json()
+          const realShippingCents = shippingRes.ok && shippingData.shippingCents ? shippingData.shippingCents : 590
+          setCalculatedShippingCents(realShippingCents)
 
           const shopifyTotal = typeof cart.totalCents === "number" ? cart.totalCents : subtotalCents
           const currentDiscountCents = subtotalCents - shopifyTotal
           const finalDiscountCents = currentDiscountCents > 0 ? currentDiscountCents : 0
-          const newTotalCents = subtotalCents - finalDiscountCents + flatShippingCents
+          const newTotalCents = subtotalCents - finalDiscountCents + realShippingCents
 
           const piRes = await fetch("/api/payment-intent", {
             method: "POST",
@@ -996,7 +1019,11 @@ function CheckoutInner({
     const province    = sd?.address?.state        || bd?.address?.state        || ""
     const countryCode = sd?.address?.country      || bd?.address?.country      || "IT"
 
-    console.log("[ApplePay] ✅ Dati ricevuti:", { name, email, phone, address1, city, postalCode, province, countryCode })
+    // Calcola il totale con la shipping rate selezionata nel payment sheet
+    const selectedShippingCents = event.shippingRate?.amount ?? 590
+    const expressTotal = subtotalCents - discountCents + selectedShippingCents
+
+    console.log("[ApplePay] ✅ Dati ricevuti:", { name, email, phone, address1, city, postalCode, province, countryCode, shippingCents: selectedShippingCents })
 
     try {
       // Crea il PI con i dati reali del wallet
@@ -1005,7 +1032,7 @@ function CheckoutInner({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          amountCents: totalToPayCents,
+          amountCents: expressTotal,
           customer: { fullName: name, email, phone, address1, address2, city, postalCode, province, countryCode },
           expressCheckout: true,
           paymentMethodType: event.expressPaymentType || "express",
@@ -1215,16 +1242,49 @@ function CheckoutInner({
                       ],
                     })
                   }}
-                  onShippingAddressChange={(event) => {
-                    event.resolve({
-                      shippingRates: [
-                        {
+                  onShippingAddressChange={async (event) => {
+                    try {
+                      const addr = event.address
+                      const res = await fetch("/api/calculate-shipping", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          sessionId,
+                          destination: {
+                            city: addr.city || "",
+                            province: addr.state || "",
+                            postalCode: addr.postal_code || "",
+                            countryCode: addr.country || "IT",
+                          },
+                        }),
+                      })
+                      const data = await res.json()
+                      if (res.ok && data.availableRates?.length > 0) {
+                        event.resolve({
+                          shippingRates: data.availableRates.map((rate: any) => ({
+                            id: rate.handle,
+                            displayName: rate.title,
+                            amount: rate.priceCents,
+                          })),
+                        })
+                      } else {
+                        event.resolve({
+                          shippingRates: [{
+                            id: "standard",
+                            displayName: data.method || "Spedizione Standard",
+                            amount: data.shippingCents || 590,
+                          }],
+                        })
+                      }
+                    } catch {
+                      event.resolve({
+                        shippingRates: [{
                           id: "standard",
                           displayName: "Spedizione Standard",
                           amount: 590,
-                        },
-                      ],
-                    })
+                        }],
+                      })
+                    }
                   }}
                   onReady={(event) => {
                     const available = event.availablePaymentMethods
@@ -1762,7 +1822,12 @@ function CheckoutPageContent() {
         setLoading(true)
         setError(null)
 
-        const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
+        // Fetch cart e stripe-status in parallelo
+        const [res, pkRes] = await Promise.all([
+          fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`),
+          fetch("/api/stripe-status"),
+        ])
+
         const data: CartSessionResponse & { error?: string } = await res.json()
 
         if (!res.ok || (data as any).error) {
@@ -1779,12 +1844,11 @@ function CheckoutPageContent() {
           : data.items.reduce((s, i) => s + (i.linePriceCents ?? i.priceCents ?? 0), 0)
         const shopifyTotal = typeof data.totalCents === "number" ? data.totalCents : subtotal
         const discount = Math.max(0, subtotal - shopifyTotal)
-        const total = subtotal - discount + 590
+        const total = subtotal - discount + 590 // stima iniziale, verrà ricalcolato con shipping reale
         setTotalCents(total)
         setCurrency((data.currency || "eur").toLowerCase())
 
         try {
-          const pkRes = await fetch("/api/stripe-status")
           if (!pkRes.ok) throw new Error("API stripe-status non disponibile")
           const pkData = await pkRes.json()
           if (pkData.publishableKey) {
