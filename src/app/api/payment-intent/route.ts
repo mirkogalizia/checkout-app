@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
       capture_method: "automatic",
       ...(stripeCustomerId && { customer: stripeCustomerId }),
       description,
-      ...(email && { receipt_email: email }),
+      // receipt_email rimosso: la conferma ordine la manda Shopify, non Stripe
       statement_descriptor_suffix: statementDescriptorSuffix,
       // ✅ FIX: automatic_payment_methods abilita Apple Pay, Google Pay e carta
       // senza bloccare con payment_method_types: ["card"]
