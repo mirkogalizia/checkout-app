@@ -116,6 +116,15 @@ export async function POST(req: NextRequest) {
       defaultCurrency: (body.defaultCurrency || "eur").toLowerCase(),
       shopify,
       stripeAccounts,
+      activeGateway: body.activeGateway || existingConfig.activeGateway || "stripe",
+      ...(body.airwallex && {
+        airwallex: {
+          clientId: (body.airwallex.clientId || "").trim(),
+          apiKey: (body.airwallex.apiKey || "").trim(),
+          webhookSecret: (body.airwallex.webhookSecret || "").trim(),
+          environment: body.airwallex.environment || "demo",
+        },
+      }),
     }
 
     // ✅ Salva su Firebase

@@ -85,8 +85,7 @@ export default function AirwallexPayment({
           style: {
             popupWidth: 400,
           },
-          // Metodi di pagamento da mostrare
-          methods: ["card"],
+          methods: ["card", "applepay", "googlepay"],
         })
 
         if (containerRef.current && element) {
