@@ -20,6 +20,12 @@ import {
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js"
+import dynamic_import from "next/dynamic"
+
+const AirwallexPayment = dynamic_import(
+  () => import("./airwallex/AirwallexPayment"),
+  { ssr: false },
+)
 
 export const dynamic = "force-dynamic"
 
@@ -544,15 +550,29 @@ function OrderSummary({
 }
 
 // ── MAIN CHECKOUT INNER ───────────────────────────────────────────────
+function CheckoutInnerStripe({ cart, sessionId }: { cart: CartSessionResponse; sessionId: string }) {
+  const stripe = useStripe()
+  const elements = useElements()
+  return <CheckoutInner cart={cart} sessionId={sessionId} gatewayType="stripe" stripe={stripe} elements={elements} />
+}
+
 function CheckoutInner({
   cart,
   sessionId,
+  gatewayType = "stripe",
+  airwallexConfig,
+  stripe: stripeProp,
+  elements: elementsProp,
 }: {
   cart: CartSessionResponse
   sessionId: string
+  gatewayType?: "stripe" | "airwallex"
+  airwallexConfig?: { clientId: string; environment: string }
+  stripe?: any
+  elements?: any
 }) {
-  const stripe = useStripe()
-  const elements = useElements()
+  const stripe = stripeProp || null
+  const elements = elementsProp || null
 
   const cartUrl = useMemo(() => {
     if (cart.shopDomain) return `https://${cart.shopDomain}/cart`
@@ -930,6 +950,9 @@ function CheckoutInner({
       return
     }
 
+    // Il submit del form è solo per Stripe — Airwallex usa il Drop-in
+    if (gatewayType === "airwallex") return
+
     if (!stripe || !elements) {
       setError("Stripe non pronto")
       return
@@ -1219,7 +1242,8 @@ function CheckoutInner({
             {/* Step Indicator */}
             <StepIndicator currentStep={formStep} />
 
-            {/* ── EXPRESS CHECKOUT (Apple Pay / Google Pay) ─────────── */}
+            {/* ── EXPRESS CHECKOUT (Apple Pay / Google Pay) — solo Stripe ─── */}
+            {gatewayType === "stripe" && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4 animate-fade-in-up">
               <div className="px-5 pt-5 pb-3">
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest text-center mb-3">
@@ -1314,6 +1338,7 @@ function CheckoutInner({
                 <div className="flex-1 h-px bg-gray-100" />
               </div>
             </div>
+            )}
 
             {/* ── FORM ─────────────────────────────────────────────────── */}
             <form onSubmit={handleSubmit} noValidate>
@@ -1632,7 +1657,26 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {clientSecret && !isCalculatingShipping && (
+                {/* ── AIRWALLEX DROP-IN ─────────────────────────────── */}
+                {gatewayType === "airwallex" && airwallexConfig && !isCalculatingShipping && (
+                  <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
+                    <AirwallexPayment
+                      sessionId={sessionId}
+                      totalCents={totalToPayCents}
+                      currency={currency}
+                      clientId={airwallexConfig.clientId}
+                      environment={airwallexConfig.environment as "demo" | "prod"}
+                      customer={customer}
+                      onSuccess={() => {
+                        window.location.href = `/thank-you?sessionId=${sessionId}`
+                      }}
+                      onError={(msg) => setError(msg)}
+                    />
+                  </div>
+                )}
+
+                {/* ── STRIPE PAYMENT ELEMENT ─────────────────────────── */}
+                {gatewayType === "stripe" && clientSecret && !isCalculatingShipping && (
                   <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
                     <PaymentElement
                       options={{
@@ -1661,7 +1705,7 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {!clientSecret && !isCalculatingShipping && (
+                {gatewayType === "stripe" && !clientSecret && !isCalculatingShipping && (
                   <div className="p-5 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
                     <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
@@ -1809,6 +1853,8 @@ function CheckoutPageContent() {
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
   const [totalCents, setTotalCents] = useState(1000)
   const [currency, setCurrency] = useState("eur")
+  const [gatewayType, setGatewayType] = useState<"stripe" | "airwallex">("stripe")
+  const [airwallexConfig, setAirwallexConfig] = useState<{ clientId: string; environment: string } | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -1822,13 +1868,13 @@ function CheckoutPageContent() {
         setLoading(true)
         setError(null)
 
-        // Fetch cart e stripe-status in parallelo
+        // Fetch cart e gateway-status in parallelo
         const [res, pkRes] = await Promise.all([
           fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`),
           fetch("/api/stripe-status"),
         ])
 
-        const data: CartSessionResponse & { error?: string } = await res.json()
+        const data: CartSessionResponse & { error?: string; gatewayType?: string } = await res.json()
 
         if (!res.ok || (data as any).error) {
           setError(data.error || "Errore nel recupero del carrello.")
@@ -1849,12 +1895,20 @@ function CheckoutPageContent() {
         setCurrency((data.currency || "eur").toLowerCase())
 
         try {
-          if (!pkRes.ok) throw new Error("API stripe-status non disponibile")
+          if (!pkRes.ok) throw new Error("API gateway-status non disponibile")
           const pkData = await pkRes.json()
-          if (pkData.publishableKey) {
+
+          if (pkData.gatewayType === "airwallex") {
+            setGatewayType("airwallex")
+            setAirwallexConfig({
+              clientId: pkData.clientId,
+              environment: pkData.environment,
+            })
+          } else if (pkData.publishableKey) {
+            setGatewayType("stripe")
             setStripePromise(loadStripe(pkData.publishableKey))
           } else {
-            throw new Error("PublishableKey non ricevuta")
+            throw new Error("Configurazione gateway non valida")
           }
         } catch (err) {
           setError("Impossibile inizializzare il sistema di pagamento.")
@@ -1872,7 +1926,7 @@ function CheckoutPageContent() {
     load()
   }, [sessionId])
 
-  if (loading || !stripePromise) {
+  if (loading || (gatewayType === "stripe" && !stripePromise)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -1922,9 +1976,22 @@ function CheckoutPageContent() {
     },
   }
 
+  // ─── AIRWALLEX ─────────────────────────────────────────────────────────────
+  if (gatewayType === "airwallex" && airwallexConfig) {
+    return (
+      <CheckoutInner
+        cart={cart}
+        sessionId={sessionId}
+        gatewayType="airwallex"
+        airwallexConfig={airwallexConfig}
+      />
+    )
+  }
+
+  // ─── STRIPE ───────────────────────────────────────────────────────────────
   return (
     <Elements stripe={stripePromise} options={elementsOptions}>
-      <CheckoutInner cart={cart} sessionId={sessionId} />
+      <CheckoutInnerStripe cart={cart} sessionId={sessionId} />
     </Elements>
   )
 }

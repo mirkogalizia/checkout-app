@@ -4,6 +4,7 @@ import { randomUUID } from "crypto"
 import Stripe from "stripe"
 import { db } from "@/lib/firebaseAdmin"
 import { getConfig } from "@/lib/config"
+import type { ActiveGateway } from "@/lib/config"
 
 const COLLECTION = "cartSessions"
 
@@ -119,6 +120,58 @@ export async function POST(req: NextRequest) {
     const sessionId = randomUUID()
 
     const cfg = await getConfig()
+    const activeGateway: ActiveGateway = cfg.activeGateway || "stripe"
+
+    // ✅ Costruisci cartId da token
+    const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
+
+    // ✅ ESTRAI GLI ATTRIBUTES (inclusi UTM)
+    const cartAttributes = cart.attributes || {}
+
+    // ─── AIRWALLEX: non creare PI subito, lo crea il checkout dopo ────────────
+    if (activeGateway === "airwallex") {
+      const docData = {
+        sessionId,
+        createdAt: new Date().toISOString(),
+        currency,
+        items,
+        subtotalCents,
+        shippingCents,
+        totalCents,
+        gatewayType: "airwallex" as const,
+        rawCart: {
+          ...cart,
+          id: cartId,
+          attributes: cartAttributes,
+        },
+        customer: body.customer || null,
+        shopDomain: body.shop_domain || null,
+        discountCode: body.discount_code || null,
+      }
+
+      await db.collection(COLLECTION).doc(sessionId).set(docData)
+
+      return new NextResponse(
+        JSON.stringify({
+          sessionId,
+          currency,
+          items,
+          subtotalCents,
+          shippingCents,
+          totalCents,
+          gatewayType: "airwallex",
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders(origin),
+          },
+        },
+      )
+    }
+
+    // ─── STRIPE: crea PI subito (comportamento esistente) ─────────────────────
     const firstStripe =
       (cfg.stripeAccounts || []).find((a: any) => a.secretKey) || null
     const secretKey =
@@ -149,12 +202,6 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // ✅ Costruisci cartId da token
-    const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
-
-    // ✅ ESTRAI GLI ATTRIBUTES (inclusi UTM)
-    const cartAttributes = cart.attributes || {}
-
     const docData = {
       sessionId,
       createdAt: new Date().toISOString(),
@@ -163,12 +210,13 @@ export async function POST(req: NextRequest) {
       subtotalCents,
       shippingCents,
       totalCents,
+      gatewayType: "stripe" as const,
       paymentIntentId: paymentIntent.id,
       paymentIntentClientSecret: paymentIntent.client_secret,
       rawCart: {
         ...cart,
         id: cartId,
-        attributes: cartAttributes  // ✅ Salva attributes esplicitamente
+        attributes: cartAttributes,
       },
       customer: body.customer || null,
       shopDomain: body.shop_domain || null,
@@ -185,6 +233,7 @@ export async function POST(req: NextRequest) {
         subtotalCents,
         shippingCents,
         totalCents,
+        gatewayType: "stripe",
         paymentIntentClientSecret: paymentIntent.client_secret,
       }),
       {

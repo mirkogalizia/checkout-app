@@ -30,11 +30,22 @@ export interface StripeAccount {
   productTitle10?: string
 }
 
+export interface AirwallexConfig {
+  clientId: string
+  apiKey: string
+  webhookSecret: string
+  environment: "demo" | "prod"
+}
+
+export type ActiveGateway = "stripe" | "airwallex"
+
 export interface AppConfig {
   checkoutDomain: string
   shopify: ShopifyConfig
   stripeAccounts: StripeAccount[]
   defaultCurrency?: string
+  activeGateway?: ActiveGateway
+  airwallex?: AirwallexConfig
 }
 
 const CONFIG_COLLECTION = "config"
@@ -43,6 +54,13 @@ const CONFIG_DOC_ID = "global"
 const defaultConfig: AppConfig = {
   checkoutDomain: process.env.NEXT_PUBLIC_CHECKOUT_DOMAIN || "",
   defaultCurrency: "eur",
+  activeGateway: "stripe",
+  airwallex: {
+    clientId: "",
+    apiKey: "",
+    webhookSecret: "",
+    environment: "demo",
+  },
 
   shopify: {
     shopDomain: process.env.SHOPIFY_SHOP_DOMAIN || "",
@@ -179,11 +197,20 @@ export async function getConfig(): Promise<AppConfig> {
     productTitle10: acc?.productTitle10 || "",
   }))
 
+  const airwallex: AirwallexConfig = {
+    clientId: data.airwallex?.clientId || defaultConfig.airwallex!.clientId,
+    apiKey: data.airwallex?.apiKey || defaultConfig.airwallex!.apiKey,
+    webhookSecret: data.airwallex?.webhookSecret || defaultConfig.airwallex!.webhookSecret,
+    environment: data.airwallex?.environment || defaultConfig.airwallex!.environment,
+  }
+
   return {
     checkoutDomain: data.checkoutDomain || defaultConfig.checkoutDomain,
     defaultCurrency: data.defaultCurrency || defaultConfig.defaultCurrency,
+    activeGateway: data.activeGateway || defaultConfig.activeGateway,
     shopify,
     stripeAccounts,
+    airwallex,
   }
 }
 

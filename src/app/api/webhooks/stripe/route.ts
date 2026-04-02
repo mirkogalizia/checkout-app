@@ -295,7 +295,7 @@ function buildFbp(rawFbp: string | undefined): string | undefined {
   return undefined
 }
 
-async function sendMetaPurchaseEvent({
+export async function sendMetaPurchaseEvent({
   paymentIntent,
   sessionData,
   sessionId,
@@ -527,7 +527,7 @@ async function sendMetaPurchaseEvent({
 // CREA ORDINE SHOPIFY CON GESTIONE CLIENTI ESISTENTI
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function createShopifyOrder({
+export async function createShopifyOrder({
   sessionId,
   sessionData,
   paymentIntent,
@@ -764,7 +764,7 @@ async function createShopifyOrder({
 // SVUOTA CARRELLO
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function clearShopifyCart(cartId: string, config: any) {
+export async function clearShopifyCart(cartId: string, config: any) {
   try {
     const shopifyDomain   = config.shopify?.shopDomain
     const storefrontToken = config.shopify?.storefrontToken

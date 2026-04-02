@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { db } from "@/lib/firebaseAdmin"
 import { getActiveStripeAccount } from "@/lib/stripeRotation"
+import { getConfig } from "@/lib/config"
+import { createAirwallexPaymentIntent } from "@/lib/gateway/airwallex"
 
 const COLLECTION = "cartSessions"
 
@@ -52,6 +54,72 @@ export async function POST(req: NextRequest) {
     const data: any = snap.data() || {}
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
+    // ─── CHECK GATEWAY ATTIVO ─────────────────────────────────────────────────
+    const cfg = await getConfig()
+    const activeGateway = cfg.activeGateway || "stripe"
+
+    if (activeGateway === "airwallex" && cfg.airwallex?.clientId && cfg.airwallex?.apiKey) {
+      console.log("[payment-intent] 🔄 Gateway attivo: Airwallex")
+
+      const customerBody = (body?.customer || {}) as CustomerPayload
+      const fullName = customerBody.fullName || `${customerBody.firstName || ""} ${customerBody.lastName || ""}`.trim()
+      const email = (customerBody.email || "").trim()
+      const phone = (customerBody.phone || "").trim()
+
+      const result = await createAirwallexPaymentIntent(cfg.airwallex, {
+        amountCents,
+        currency,
+        sessionId,
+        customer: {
+          fullName,
+          email,
+          phone,
+          address1: customerBody.address1,
+          address2: customerBody.address2,
+          city: customerBody.city,
+          postalCode: customerBody.postalCode,
+          province: customerBody.province,
+          countryCode: customerBody.countryCode,
+        },
+        metadata: {
+          session_id: sessionId,
+          merchant_site: "https://nfrcheckout.com",
+        },
+      })
+
+      // Salva su Firestore
+      await db.collection(COLLECTION).doc(sessionId).update({
+        customer: {
+          fullName,
+          email,
+          phone,
+          address1: customerBody.address1 || "",
+          address2: customerBody.address2 || "",
+          city: customerBody.city || "",
+          postalCode: customerBody.postalCode || "",
+          province: customerBody.province || "",
+          countryCode: (customerBody.countryCode || "IT").toUpperCase(),
+        },
+        paymentIntentId: result.intentId,
+        gatewayType: "airwallex",
+        items: data.items || [],
+        subtotalCents: data.subtotalCents,
+        shippingCents: 0,
+        totalCents: amountCents,
+        currency: currency.toUpperCase(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      return NextResponse.json({
+        clientSecret: result.clientSecret,
+        gatewayType: "airwallex",
+        airwallexClientId: result.airwallexClientId,
+        airwallexEnvironment: result.airwallexEnvironment,
+        intentId: result.intentId,
+      }, { status: 200 })
+    }
+
+    // ─── STRIPE FLOW (codice esistente) ───────────────────────────────────────
     const fullNameRaw =
       customerBody.fullName ||
       `${customerBody.firstName || ""} ${customerBody.lastName || ""}`.trim()

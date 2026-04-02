@@ -142,6 +142,15 @@ export default function OnboardingPage() {
       ).toLowerCase(),
       checkoutDomain:
         (typeof window !== "undefined" ? window.location.origin : "") || "",
+
+      // Gateway di pagamento
+      activeGateway: (formData.get("activeGateway") as string) || existingConfig?.activeGateway || "stripe",
+      airwallex: {
+        clientId: ((formData.get("airwallexClientId") as string) || existingConfig?.airwallex?.clientId || "").trim(),
+        apiKey: ((formData.get("airwallexApiKey") as string) || existingConfig?.airwallex?.apiKey || "").trim(),
+        webhookSecret: ((formData.get("airwallexWebhookSecret") as string) || existingConfig?.airwallex?.webhookSecret || "").trim(),
+        environment: (formData.get("airwallexEnvironment") as string) || existingConfig?.airwallex?.environment || "demo",
+      },
     };
 
     try {
@@ -606,6 +615,78 @@ export default function OnboardingPage() {
                 <p className="mt-2">
                   ⚠️ Configura questo endpoint su <strong>ogni</strong> account Stripe attivo.
                 </p>
+              </div>
+            </section>
+
+            {/* Gateway di pagamento */}
+            <section className="glass-card p-5 md:p-6 space-y-4">
+              <h2 className="text-sm font-semibold text-slate-100 uppercase tracking-widest">
+                Gateway di Pagamento
+              </h2>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="activeGateway"
+                      value="stripe"
+                      defaultChecked={(existingConfig?.activeGateway || "stripe") === "stripe"}
+                      className="accent-emerald-500"
+                    />
+                    <span className="text-[13px] text-slate-200 font-medium">Stripe</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="activeGateway"
+                      value="airwallex"
+                      defaultChecked={existingConfig?.activeGateway === "airwallex"}
+                      className="accent-emerald-500"
+                    />
+                    <span className="text-[13px] text-slate-200 font-medium">Airwallex</span>
+                  </label>
+                </div>
+
+                <div className="border border-white/10 rounded-xl p-4 space-y-3 bg-black/20">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Airwallex Config</p>
+                  <input
+                    type="text"
+                    name="airwallexClientId"
+                    placeholder="Client ID"
+                    defaultValue={existingConfig?.airwallex?.clientId || ""}
+                    className="glass-input w-full"
+                  />
+                  <input
+                    type={showSensitive ? "text" : "password"}
+                    name="airwallexApiKey"
+                    placeholder="API Key"
+                    defaultValue={existingConfig?.airwallex?.apiKey || ""}
+                    className="glass-input w-full"
+                  />
+                  <input
+                    type={showSensitive ? "text" : "password"}
+                    name="airwallexWebhookSecret"
+                    placeholder="Webhook Secret"
+                    defaultValue={existingConfig?.airwallex?.webhookSecret || ""}
+                    className="glass-input w-full"
+                  />
+                  <select
+                    name="airwallexEnvironment"
+                    defaultValue={existingConfig?.airwallex?.environment || "demo"}
+                    className="glass-input w-full"
+                  >
+                    <option value="demo">Demo (Test)</option>
+                    <option value="prod">Production</option>
+                  </select>
+
+                  <div className="text-[11px] text-slate-400 space-y-2">
+                    <p className="font-medium text-slate-300">Endpoint webhook Airwallex:</p>
+                    <code className="block bg-black/40 border border-white/10 rounded px-2 py-1.5 text-emerald-400 break-all">
+                      {typeof window !== "undefined" ? window.location.origin : "https://tuo-dominio.vercel.app"}/api/webhooks/airwallex
+                    </code>
+                  </div>
+                </div>
               </div>
             </section>
 
