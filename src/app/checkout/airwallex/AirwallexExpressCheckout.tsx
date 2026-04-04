@@ -21,14 +21,12 @@ export default function AirwallexExpressCheckout({
   onSuccess,
   onError,
 }: AirwallexExpressCheckoutProps) {
-  const appleContainerRef = useRef<HTMLDivElement>(null)
-  const googleContainerRef = useRef<HTMLDivElement>(null)
-  const [appleReady, setAppleReady] = useState(false)
-  const [googleReady, setGoogleReady] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const elementRef = useRef<any>(null)
+  const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [hidden, setHidden] = useState(false)
   const initRef = useRef(false)
-  const appleElRef = useRef<any>(null)
-  const googleElRef = useRef<any>(null)
 
   useEffect(() => {
     if (initRef.current) return
@@ -40,15 +38,13 @@ export default function AirwallexExpressCheckout({
         const piRes = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            amountCents: totalCents,
-          }),
+          body: JSON.stringify({ sessionId, amountCents: totalCents }),
         })
         const piData = await piRes.json()
 
         if (!piRes.ok || !piData.clientSecret) {
           console.warn("[airwallex-express] PI non creato:", piData.error)
+          setHidden(true)
           setLoading(false)
           return
         }
@@ -56,104 +52,75 @@ export default function AirwallexExpressCheckout({
         const Airwallex = await getAirwallexSDK(environment)
         const { createElement } = Airwallex
 
-        const commonConfig = {
+        // Usa dropIn con solo metodi express (applepay + googlepay)
+        const element = createElement("dropIn", {
           intent_id: piData.intentId,
           client_secret: piData.clientSecret,
           currency: currency.toLowerCase(),
-          amount: {
-            value: totalCents / 100,
-            currency: currency.toUpperCase(),
-          },
-          countryCode: "IT",
-          requiredBillingContactFields: ["postalAddress", "name", "email", "phone"],
-          requiredShippingContactFields: ["postalAddress", "name", "email", "phone"],
+          mode: "payment",
+          autoCapture: true,
+          methods: ["applepay", "googlepay"],
+        })
+
+        if (containerRef.current && element) {
+          element.mount(containerRef.current)
+          elementRef.current = element
         }
 
-        // ── APPLE PAY ────────────────────────────────────────────────────
-        try {
-          const appleEl = createElement("applepay", commonConfig)
-          if (appleEl && appleContainerRef.current) {
-            appleEl.mount(appleContainerRef.current)
-            appleElRef.current = appleEl
-          }
-        } catch (e: any) {
-          console.log("[airwallex-express] Apple Pay non disponibile:", e?.message)
-        }
-
-        // ── GOOGLE PAY ───────────────────────────────────────────────────
-        try {
-          const googleEl = createElement("googlepay", commonConfig)
-          if (googleEl && googleContainerRef.current) {
-            googleEl.mount(googleContainerRef.current)
-            googleElRef.current = googleEl
-          }
-        } catch (e: any) {
-          console.log("[airwallex-express] Google Pay non disponibile:", e?.message)
-        }
-
-        // ── EVENTS ──────────────────────────────────────────────────────
-        const handleSuccess = async (e: Event) => {
-          const detail = (e as CustomEvent).detail
-          console.log("[airwallex-express] ✅ Pagamento completato:", detail)
-
-          // Salva dati cliente dal payment sheet in Firebase
-          try {
-            const billing = detail?.billing || detail?.payerDetail || {}
-            const shipping = detail?.shipping || billing
-
-            if (billing.name || billing.email || shipping?.address) {
-              const nameParts = (billing.name || "").trim().split(/\s+/)
-              const customerData = {
-                fullName: billing.name || "",
-                email: billing.email || "",
-                phone: billing.phone || billing.phoneNumber || "",
-                address1: shipping?.address?.line1 || shipping?.address?.street || "",
-                address2: shipping?.address?.line2 || "",
-                city: shipping?.address?.city || "",
-                province: shipping?.address?.state || shipping?.address?.province || "",
-                postalCode: shipping?.address?.postCode || shipping?.address?.postalCode || "",
-                countryCode: shipping?.address?.countryCode || "IT",
-              }
-
-              await fetch(`/api/cart-session?sessionId=${sessionId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ customer: customerData }),
-              })
-              console.log("[airwallex-express] 👤 Dati cliente salvati nella sessione")
+        // Success
+        window.addEventListener("onSuccess", ((e: CustomEvent) => {
+          console.log("[airwallex-express] ✅ Pagamento express completato:", e.detail)
+          const detail = e.detail || {}
+          const billing = detail.billing || detail.payerDetail || {}
+          const shipping = detail.shipping || billing
+          if (billing.email || billing.name) {
+            const customerData = {
+              fullName: billing.name || "",
+              email: billing.email || "",
+              phone: billing.phone || "",
+              address1: shipping?.address?.line1 || shipping?.address?.street || "",
+              address2: shipping?.address?.line2 || "",
+              city: shipping?.address?.city || "",
+              province: shipping?.address?.state || "",
+              postalCode: shipping?.address?.postCode || shipping?.address?.postalCode || "",
+              countryCode: shipping?.address?.countryCode || "IT",
             }
-          } catch (saveErr) {
-            console.warn("[airwallex-express] ⚠ Impossibile salvare dati cliente:", saveErr)
+            fetch(`/api/cart-session?sessionId=${sessionId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ customer: customerData }),
+            }).catch(() => {})
           }
-
           onSuccess()
-        }
+        }) as EventListener)
 
-        const handleError = (e: Event) => {
-          const detail = (e as CustomEvent).detail
-          console.error("[airwallex-express] ❌ Errore:", detail)
-          onError(detail?.message || "Errore nel pagamento")
-        }
+        // Error
+        window.addEventListener("onError", ((e: CustomEvent) => {
+          console.error("[airwallex-express] ❌ Errore:", e.detail)
+          onError(e.detail?.message || "Errore nel pagamento")
+        }) as EventListener)
 
-        const handleAppleReady = () => {
-          console.log("[airwallex-express] ✅ Apple Pay pronto")
-          setAppleReady(true)
-        }
+        // Ready — controlla se Apple Pay / Google Pay sono disponibili
+        window.addEventListener("onReady", ((e: CustomEvent) => {
+          console.log("[airwallex-express] onReady:", e.detail)
+          const available = e.detail?.availablePaymentMethods || {}
+          const hasExpress =
+            available.applepay || available.googlepay ||
+            available.applePay || available.googlePay
+          if (hasExpress === false) {
+            setHidden(true)
+          } else {
+            setReady(true)
+          }
+          setLoading(false)
+        }) as EventListener)
 
-        const handleGoogleReady = () => {
-          console.log("[airwallex-express] ✅ Google Pay pronto")
-          setGoogleReady(true)
-        }
+        // Timeout fallback: dopo 5s nascondi il loading comunque
+        setTimeout(() => setLoading(false), 5000)
 
-        window.addEventListener("onSuccess", handleSuccess)
-        window.addEventListener("onError", handleError)
-        window.addEventListener("onReady", handleAppleReady)
-        window.addEventListener("onGooglePayReady", handleGoogleReady)
-
-        // Fallback: se dopo 3s nessun ready → nascondi loading
-        setTimeout(() => setLoading(false), 3000)
       } catch (err: any) {
         console.error("[airwallex-express] Errore init:", err)
+        setHidden(true)
         setLoading(false)
       }
     }
@@ -161,18 +128,11 @@ export default function AirwallexExpressCheckout({
     init()
 
     return () => {
-      try { appleElRef.current?.unmount() } catch {}
-      try { googleElRef.current?.unmount() } catch {}
+      try { elementRef.current?.unmount() } catch {}
     }
   }, [])
 
-  // Quando un elemento diventa ready, togli il loading
-  useEffect(() => {
-    if (appleReady || googleReady) setLoading(false)
-  }, [appleReady, googleReady])
-
-  // Se nessun metodo express disponibile dopo il caricamento, nascondi tutto
-  if (!loading && !appleReady && !googleReady) return null
+  if (hidden) return null
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-4 animate-fade-in-up">
@@ -188,21 +148,20 @@ export default function AirwallexExpressCheckout({
         )}
 
         <div
-          ref={appleContainerRef}
-          id="airwallex-applepay"
-          style={{ display: appleReady ? "block" : "none", marginBottom: appleReady ? "8px" : 0 }}
-        />
-        <div
-          ref={googleContainerRef}
-          id="airwallex-googlepay"
-          style={{ display: googleReady ? "block" : "none" }}
+          ref={containerRef}
+          id="airwallex-express-dropin"
+          style={{
+            minHeight: ready ? "auto" : 0,
+            opacity: ready ? 1 : 0,
+            transition: "opacity 0.3s",
+          }}
         />
       </div>
 
-      {(appleReady || googleReady) && (
-        <div className="flex items-center gap-3 px-5 pb-4 mt-1">
+      {ready && (
+        <div className="flex items-center gap-3 px-5 pb-4">
           <div className="flex-1 h-px bg-gray-100" />
-          <span className="text-[11px] text-gray-400 font-medium">oppure continua sotto</span>
+          <span className="text-[11px] text-gray-400 font-medium">oppure inserisci i tuoi dati</span>
           <div className="flex-1 h-px bg-gray-100" />
         </div>
       )}
