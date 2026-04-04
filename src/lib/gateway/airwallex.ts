@@ -116,7 +116,7 @@ export function getAirwallexClientConfig(config: AirwallexConfig): GatewayClient
 }
 
 /**
- * Verifica la signature di un webhook Airwallex.
+ * Verifica la signature di un webhook Airwallex (formato: timestamp + body).
  */
 export function verifyAirwallexWebhook(
   body: string,
@@ -130,6 +130,26 @@ export function verifyAirwallexWebhook(
     const expected = crypto
       .createHmac("sha256", secret)
       .update(payload)
+      .digest("hex")
+    return expected === signature
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Verifica la signature di un webhook Airwallex (formato: solo body).
+ */
+export function verifyAirwallexWebhookBodyOnly(
+  body: string,
+  signature: string,
+  secret: string,
+): boolean {
+  try {
+    const crypto = require("crypto")
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(body)
       .digest("hex")
     return expected === signature
   } catch {

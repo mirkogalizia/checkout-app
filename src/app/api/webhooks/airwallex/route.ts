@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/firebaseAdmin"
 import { getConfig } from "@/lib/config"
-import { verifyAirwallexWebhook } from "@/lib/gateway/airwallex"
+import { verifyAirwallexWebhook, verifyAirwallexWebhookBodyOnly } from "@/lib/gateway/airwallex"
 import {
   createShopifyOrder,
   sendMetaPurchaseEvent,
@@ -28,6 +28,14 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get("x-signature") || ""
     const timestamp = req.headers.get("x-timestamp") || ""
 
+    // Debug headers
+    console.log("[airwallex-webhook] 🔍 Headers:", {
+      "x-signature": signature ? signature.substring(0, 20) + "..." : "(vuoto)",
+      "x-timestamp": timestamp || "(vuoto)",
+      "content-type": req.headers.get("content-type"),
+    })
+    console.log("[airwallex-webhook] 🔑 Secret configurato:", !!config.airwallex.webhookSecret)
+
     // Verifica signature
     const isValid = verifyAirwallexWebhook(
       body,
@@ -37,8 +45,16 @@ export async function POST(req: NextRequest) {
     )
 
     if (!isValid) {
-      console.error("[airwallex-webhook] ❌ Signature non valida")
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+      // Prova anche senza timestamp (alcune versioni Airwallex firmano solo il body)
+      const isValidBodyOnly = verifyAirwallexWebhookBodyOnly(body, signature, config.airwallex.webhookSecret)
+      console.error("[airwallex-webhook] ❌ Signature non valida (timestamp+body:", isValid, "| solo body:", isValidBodyOnly, ")")
+
+      if (!isValidBodyOnly) {
+        return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+      }
+      console.log("[airwallex-webhook] ✅ Signature valida (formato: solo body)")
+    } else {
+      console.log("[airwallex-webhook] ✅ Signature valida (formato: timestamp+body)")
     }
 
     const event = JSON.parse(body)
