@@ -19,7 +19,8 @@ export async function GET() {
       currency: "EUR",
       items: [
         {
-          id: "test-product-1",
+          id: 0,
+          variant_id: null,
           title: "Prodotto Test €1",
           quantity: 1,
           priceCents: 100,

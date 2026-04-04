@@ -68,12 +68,17 @@ export async function POST(req: NextRequest) {
 
     console.log(`[calculate-shipping] → Calcolo spedizione per ${destination.city}, ${destination.countryCode}`)
 
-    const shippingRates = await calculateShippingWithAdmin({
-      shopifyDomain,
-      adminToken,
-      cartItems,
-      destination,
-    })
+    let shippingRates: any[] | null = null
+    try {
+      shippingRates = await calculateShippingWithAdmin({
+        shopifyDomain,
+        adminToken,
+        cartItems,
+        destination,
+      })
+    } catch (shippingErr: any) {
+      console.warn("[calculate-shipping] ⚠ Errore calcolo spedizione, uso fallback:", shippingErr.message)
+    }
 
     if (!shippingRates || shippingRates.length === 0) {
       console.warn("[calculate-shipping] ⚠ Nessuna tariffa da Shopify, uso fallback")
