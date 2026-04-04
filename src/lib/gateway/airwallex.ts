@@ -116,43 +116,50 @@ export function getAirwallexClientConfig(config: AirwallexConfig): GatewayClient
 }
 
 /**
- * Verifica la signature di un webhook Airwallex (formato: timestamp + body).
+ * Verifica la signature di un webhook Airwallex.
+ * Prova tutti i formati documentati e ritorna { isValid, format } per debug.
  */
 export function verifyAirwallexWebhook(
   body: string,
   signature: string,
   timestamp: string,
   secret: string,
-): boolean {
-  try {
-    const crypto = require("crypto")
-    const payload = `${timestamp}${body}`
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(payload)
-      .digest("hex")
-    return expected === signature
-  } catch {
-    return false
+): { isValid: boolean; format: string } {
+  const crypto = require("crypto")
+
+  const candidates: { label: string; payload: string }[] = [
+    { label: "timestamp+body",     payload: `${timestamp}${body}` },
+    { label: "timestamp.body",     payload: `${timestamp}.${body}` },
+    { label: "body-only",          payload: body },
+  ]
+
+  for (const { label, payload } of candidates) {
+    const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex")
+    if (expected === signature) return { isValid: true, format: label }
   }
+
+  // Log per debug (prime 20 chars di signature e expected del primo formato)
+  const debugExpected = crypto
+    .createHmac("sha256", secret)
+    .update(`${timestamp}${body}`)
+    .digest("hex")
+  console.error("[airwallex-verify] received:", signature.substring(0, 20))
+  console.error("[airwallex-verify] expected (timestamp+body):", debugExpected.substring(0, 20))
+  console.error("[airwallex-verify] secret length:", secret.length)
+  console.error("[airwallex-verify] timestamp:", timestamp)
+
+  return { isValid: false, format: "none" }
 }
 
 /**
- * Verifica la signature di un webhook Airwallex (formato: solo body).
+ * @deprecated - usa verifyAirwallexWebhook che ritorna { isValid, format }
  */
 export function verifyAirwallexWebhookBodyOnly(
   body: string,
   signature: string,
   secret: string,
 ): boolean {
-  try {
-    const crypto = require("crypto")
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(body)
-      .digest("hex")
-    return expected === signature
-  } catch {
-    return false
-  }
+  const crypto = require("crypto")
+  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex")
+  return expected === signature
 }
