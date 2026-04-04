@@ -65,14 +65,8 @@ export default function AirwallexPayment({
           return
         }
 
-        // Carica Airwallex SDK
-        const Airwallex = await import("airwallex-payment-elements")
-        const { loadAirwallex } = Airwallex
-
-        await loadAirwallex({
-          env: environment,
-          origin: window.location.origin,
-        })
+        // Carica Airwallex SDK (singleton condiviso con express checkout)
+        const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
 
         // Crea Drop-in element
         const { createElement } = Airwallex

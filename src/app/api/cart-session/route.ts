@@ -261,6 +261,47 @@ export async function POST(req: NextRequest) {
   }
 }
 
+export async function PATCH(req: NextRequest) {
+  try {
+    const origin = req.headers.get("origin")
+    const { searchParams } = new URL(req.url)
+    const sessionId = searchParams.get("sessionId")
+
+    if (!sessionId) {
+      return new NextResponse(
+        JSON.stringify({ error: "sessionId mancante" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders(origin) } },
+      )
+    }
+
+    const body = await req.json().catch(() => ({}))
+
+    const update: Record<string, any> = {}
+    if (body.customer) update.customer = body.customer
+    if (body.shippingCents !== undefined) update.shippingCents = body.shippingCents
+
+    if (Object.keys(update).length === 0) {
+      return new NextResponse(
+        JSON.stringify({ error: "Nessun dato da aggiornare" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders(origin) } },
+      )
+    }
+
+    await db.collection(COLLECTION).doc(sessionId).update(update)
+
+    return new NextResponse(
+      JSON.stringify({ success: true }),
+      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) } },
+    )
+  } catch (err) {
+    console.error("[cart-session PATCH] errore:", err)
+    return new NextResponse(
+      JSON.stringify({ error: "Errore aggiornamento sessione" }),
+      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders(null) } },
+    )
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const origin = req.headers.get("origin")

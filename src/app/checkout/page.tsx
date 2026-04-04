@@ -27,6 +27,11 @@ const AirwallexPayment = dynamic_import(
   { ssr: false },
 )
 
+const AirwallexExpressCheckout = dynamic_import(
+  () => import("./airwallex/AirwallexExpressCheckout"),
+  { ssr: false },
+)
+
 export const dynamic = "force-dynamic"
 
 type CheckoutItem = {
@@ -1241,6 +1246,20 @@ function CheckoutInner({
 
             {/* Step Indicator */}
             <StepIndicator currentStep={formStep} />
+
+            {/* ── EXPRESS CHECKOUT AIRWALLEX (Apple Pay / Google Pay) ──────── */}
+            {gatewayType === "airwallex" && airwallexConfig && (
+              <AirwallexExpressCheckout
+                sessionId={sessionId}
+                totalCents={totalToPayCents}
+                currency={currency}
+                environment={airwallexConfig.environment as "demo" | "prod"}
+                onSuccess={() => {
+                  window.location.href = `/thank-you?sessionId=${sessionId}`
+                }}
+                onError={(msg) => setError(msg)}
+              />
+            )}
 
             {/* ── EXPRESS CHECKOUT (Apple Pay / Google Pay) — solo Stripe ─── */}
             {gatewayType === "stripe" && (
