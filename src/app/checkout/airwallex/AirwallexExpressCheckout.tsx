@@ -77,7 +77,9 @@ export default function AirwallexExpressCheckout({
         try {
           const appleEl = createElement("applePayButton", {
             ...baseOptions,
-            appearance: { theme: "black" },
+            buttonColor: "black",
+            buttonType: "pay",
+            requiredShippingContactFields: ["name", "email", "phone", "postalAddress"],
           })
           if (appleRef.current && appleEl) {
             appleEl.mount(appleRef.current)
@@ -104,7 +106,6 @@ export default function AirwallexExpressCheckout({
         try {
           const googleEl = createElement("googlePayButton", {
             ...baseOptions,
-            appearance: { theme: "black" },
           })
           if (googleRef.current && googleEl) {
             googleEl.mount(googleRef.current)
