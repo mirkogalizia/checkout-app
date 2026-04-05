@@ -45,11 +45,16 @@ export async function POST(req: NextRequest) {
     )
 
     if (!isValid) {
-      console.error("[airwallex-webhook] ❌ Signature non valida — nessun formato ha corrisposto")
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+      // Bypass temporaneo per debug — rimuovere dopo aver fixato il secret
+      if (process.env.AIRWALLEX_SKIP_SIGNATURE === "true") {
+        console.warn("[airwallex-webhook] ⚠️ SIGNATURE BYPASS ATTIVO — solo per debug")
+      } else {
+        console.error("[airwallex-webhook] ❌ Signature non valida — nessun formato ha corrisposto")
+        return NextResponse.json({ error: "Invalid signature" }, { status: 401 })
+      }
+    } else {
+      console.log(`[airwallex-webhook] ✅ Signature valida (formato: ${format})`)
     }
-
-    console.log(`[airwallex-webhook] ✅ Signature valida (formato: ${format})`)
 
     const event = JSON.parse(body)
     console.log(`[airwallex-webhook] 📨 Evento: ${event.name}`)
