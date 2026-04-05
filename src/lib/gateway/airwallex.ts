@@ -55,10 +55,14 @@ export async function createAirwallexPaymentIntent(
   const requestId = crypto.randomUUID()
   const amountDecimal = params.amountCents / 100
 
+  // merchant_order_id deve essere univoco per ogni PI — aggiungiamo il requestId
+  // Il session_id va in metadata così il webhook lo trova sempre
+  const merchantOrderId = `${params.sessionId}-${requestId.slice(0, 8)}`
+
   const body: Record<string, any> = {
     amount: amountDecimal,
     currency: params.currency.toLowerCase(),
-    merchant_order_id: params.sessionId,
+    merchant_order_id: merchantOrderId,
     request_id: requestId,
     metadata: {
       session_id: params.sessionId,

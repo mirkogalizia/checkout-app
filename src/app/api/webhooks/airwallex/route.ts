@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       const amountRaw = piData.amount || 0
       const amountCents = Math.round(amountRaw * 100)
       const currency = (piData.currency || "EUR").toUpperCase()
-      const sessionId = piData.metadata?.session_id || piData.merchant_order_id
+      const sessionId = piData.metadata?.session_id
 
       console.log(`[airwallex-webhook] 💳 Intent ID: ${intentId}`)
       console.log(`[airwallex-webhook] 💰 Importo: €${amountRaw}`)

@@ -88,8 +88,20 @@ export async function POST(req: NextRequest) {
       })
 
       // Salva su Firestore
-      await db.collection(COLLECTION).doc(sessionId).update({
-        customer: {
+      const customerUpdate: Record<string, any> = {
+        paymentIntentId: result.intentId,
+        gatewayType: "airwallex",
+        items: data.items || [],
+        subtotalCents: data.subtotalCents,
+        shippingCents: data.shippingCents ?? 0,
+        totalCents: amountCents,
+        currency: currency.toUpperCase(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      // Salva cliente solo se ha dati reali (non sovrascrivere per express checkout senza form)
+      if (fullName || email) {
+        customerUpdate.customer = {
           fullName,
           email,
           phone,
@@ -99,16 +111,10 @@ export async function POST(req: NextRequest) {
           postalCode: customerBody.postalCode || "",
           province: customerBody.province || "",
           countryCode: (customerBody.countryCode || "IT").toUpperCase(),
-        },
-        paymentIntentId: result.intentId,
-        gatewayType: "airwallex",
-        items: data.items || [],
-        subtotalCents: data.subtotalCents,
-        shippingCents: 0,
-        totalCents: amountCents,
-        currency: currency.toUpperCase(),
-        updatedAt: new Date().toISOString(),
-      })
+        }
+      }
+
+      await db.collection(COLLECTION).doc(sessionId).update(customerUpdate)
 
       return NextResponse.json({
         clientSecret: result.clientSecret,
