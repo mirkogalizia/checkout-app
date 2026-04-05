@@ -304,7 +304,7 @@ function getFallbackShipping(countryCode: string): number {
   console.log(`[getFallbackShipping] Calcolo fallback per ${country}`)
   
   if (country === "IT") {
-    return 500 // 5€
+    return 590 // 5.90€
   } else if (["FR", "DE", "ES", "AT", "BE", "NL", "PT", "IE", "LU"].includes(country)) {
     return 1000 // 10€
   } else if (["GB", "CH", "NO", "SE", "DK", "FI", "PL", "CZ", "HU"].includes(country)) {

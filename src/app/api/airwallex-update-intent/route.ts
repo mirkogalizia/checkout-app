@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const baseUrl = BASE_URLS[config.airwallex.environment]
 
     const res = await fetch(`${baseUrl}/api/v1/pa/payment_intents/${intentId}`, {
-      method: "PUT",
+      method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",

@@ -25,6 +25,15 @@ type AirwallexPaymentProps = {
   onConfirmReady: (confirmFn: () => Promise<void>) => void
 }
 
+const fieldStyle = {
+  base: {
+    color: "#111827",
+    fontSize: "16px",
+    fontFamily: "inherit",
+    "::placeholder": { color: "#9ca3af" },
+  },
+}
+
 export default function AirwallexPayment({
   sessionId,
   totalCents,
@@ -34,8 +43,11 @@ export default function AirwallexPayment({
   onError,
   onConfirmReady,
 }: AirwallexPaymentProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const elementRef = useRef<any>(null)
+  const cardNumberRef = useRef<HTMLDivElement>(null)
+  const expiryRef = useRef<HTMLDivElement>(null)
+  const cvcRef = useRef<HTMLDivElement>(null)
+
+  const cardNumberElRef = useRef<any>(null)
   const airwallexRef = useRef<any>(null)
   const piDataRef = useRef<{ clientSecret: string; intentId: string } | null>(null)
   const initRef = useRef(false)
@@ -68,24 +80,26 @@ export default function AirwallexPayment({
         const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
         airwallexRef.current = Airwallex
 
-        // Usa l'elemento "card" — solo campi carta, senza pulsante incorporato
         const { createElement } = Airwallex
-        const element = createElement("card", {
-          autoCapture: true,
-        })
 
-        if (containerRef.current && element) {
-          element.mount(containerRef.current)
-          elementRef.current = element
-        }
+        // Crea i 3 elementi separati
+        const cardNumberEl = createElement("cardNumber", { style: fieldStyle, autoCapture: true })
+        const expiryEl = createElement("expiry", { style: fieldStyle })
+        const cvcEl = createElement("cvc", { style: fieldStyle })
+
+        if (cardNumberRef.current) cardNumberEl.mount(cardNumberRef.current)
+        if (expiryRef.current) expiryEl.mount(expiryRef.current)
+        if (cvcRef.current) cvcEl.mount(cvcRef.current)
+
+        cardNumberElRef.current = cardNumberEl
 
         // Esponi la funzione di conferma al checkout page
         onConfirmReady(async () => {
-          if (!piDataRef.current || !elementRef.current) {
+          if (!piDataRef.current || !cardNumberElRef.current) {
             throw new Error("Elemento carta non pronto")
           }
           await airwallexRef.current.confirmPaymentIntent({
-            element: elementRef.current,
+            element: cardNumberElRef.current,
             client_secret: piDataRef.current.clientSecret,
             intent_id: piDataRef.current.intentId,
           })
@@ -94,7 +108,6 @@ export default function AirwallexPayment({
         // Events
         window.addEventListener("onSuccess", ((e: CustomEvent) => {
           const detail = e.detail || {}
-          // Filtra per il nostro intent_id
           if (detail.intent_id && detail.intent_id !== piDataRef.current?.intentId) return
           console.log("[airwallex] ✅ Pagamento completato:", detail)
           onSuccess()
@@ -109,7 +122,7 @@ export default function AirwallexPayment({
         }) as EventListener)
 
         window.addEventListener("onReady", (() => {
-          console.log("[airwallex] ✅ Card element pronto")
+          console.log("[airwallex] ✅ Card elements pronti")
           setReady(true)
           setLoading(false)
         }) as EventListener)
@@ -124,7 +137,7 @@ export default function AirwallexPayment({
     init()
 
     return () => {
-      try { elementRef.current?.unmount() } catch {}
+      try { cardNumberElRef.current?.unmount() } catch {}
     }
   }, [])
 
@@ -136,11 +149,38 @@ export default function AirwallexPayment({
           <span className="ml-3 text-sm text-gray-500">Caricamento metodi di pagamento...</span>
         </div>
       )}
-      <div
-        ref={containerRef}
-        id="airwallex-dropin"
-        style={{ minHeight: ready ? "auto" : 0, opacity: ready ? 1 : 0, transition: "opacity 0.3s" }}
-      />
+
+      <div style={{ opacity: ready ? 1 : 0, transition: "opacity 0.3s" }}>
+        {/* Numero carta — riga intera */}
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-gray-500 mb-1">Numero carta</label>
+          <div
+            ref={cardNumberRef}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm focus-within:border-gray-400 transition-colors"
+            style={{ minHeight: 48 }}
+          />
+        </div>
+
+        {/* Scadenza + CVC — mezza riga ciascuno */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Scadenza</label>
+            <div
+              ref={expiryRef}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm focus-within:border-gray-400 transition-colors"
+              style={{ minHeight: 48 }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">CVC</label>
+            <div
+              ref={cvcRef}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm focus-within:border-gray-400 transition-colors"
+              style={{ minHeight: 48 }}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
