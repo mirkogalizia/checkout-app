@@ -49,11 +49,16 @@ export default function AirwallexExpressCheckout({
       try {
         const totalCents = subtotalCents + SHIPPING_CENTS
 
-        const piRes = await fetch("/api/payment-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents: totalCents }),
-        })
+        // Carica SDK e crea PI in parallelo per ridurre la latenza
+        const [piRes, Airwallex] = await Promise.all([
+          fetch("/api/payment-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId, amountCents: totalCents }),
+          }),
+          getAirwallexSDK(environment),
+        ])
+
         const piData = await piRes.json()
 
         if (!piRes.ok || !piData.clientSecret) {
@@ -64,8 +69,6 @@ export default function AirwallexExpressCheckout({
         }
 
         intentIdRef.current = piData.intentId
-
-        const Airwallex = await getAirwallexSDK(environment)
         const { createElement } = Airwallex
 
         const baseOptions = {

@@ -62,12 +62,16 @@ export default function AirwallexPayment({
       try {
         setLoading(true)
 
-        // Crea PaymentIntent server-side
-        const piRes = await fetch("/api/payment-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents: totalCents, customer }),
-        })
+        // Crea PI e carica SDK in parallelo
+        const [piRes, Airwallex] = await Promise.all([
+          fetch("/api/payment-intent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId, amountCents: totalCents, customer }),
+          }),
+          import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment)),
+        ])
+
         const piData = await piRes.json()
 
         if (!piRes.ok || !piData.clientSecret) {
@@ -76,8 +80,6 @@ export default function AirwallexPayment({
         }
 
         piDataRef.current = { clientSecret: piData.clientSecret, intentId: piData.intentId }
-
-        const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
         airwallexRef.current = Airwallex
 
         const { createElement } = Airwallex

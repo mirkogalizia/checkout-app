@@ -51,6 +51,10 @@ export interface AppConfig {
 const CONFIG_COLLECTION = "config"
 const CONFIG_DOC_ID = "global"
 
+// In-memory cache: evita letture Firestore ripetute su ogni richiesta API
+let configCache: { value: AppConfig; expiresAt: number } | null = null
+const CONFIG_CACHE_TTL_MS = 60_000 // 60 secondi
+
 const defaultConfig: AppConfig = {
   checkoutDomain: process.env.NEXT_PUBLIC_CHECKOUT_DOMAIN || "",
   defaultCurrency: "eur",
@@ -155,10 +159,15 @@ const defaultConfig: AppConfig = {
 }
 
 export async function getConfig(): Promise<AppConfig> {
+  if (configCache && Date.now() < configCache.expiresAt) {
+    return configCache.value
+  }
+
   const ref = db.collection(CONFIG_COLLECTION).doc(CONFIG_DOC_ID)
   const snap = await ref.get()
 
   if (!snap.exists) {
+    configCache = { value: defaultConfig, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS }
     return defaultConfig
   }
 
@@ -204,7 +213,7 @@ export async function getConfig(): Promise<AppConfig> {
     environment: data.airwallex?.environment || defaultConfig.airwallex!.environment,
   }
 
-  return {
+  const result: AppConfig = {
     checkoutDomain: data.checkoutDomain || defaultConfig.checkoutDomain,
     defaultCurrency: data.defaultCurrency || defaultConfig.defaultCurrency,
     activeGateway: data.activeGateway || defaultConfig.activeGateway,
@@ -212,6 +221,9 @@ export async function getConfig(): Promise<AppConfig> {
     stripeAccounts,
     airwallex,
   }
+
+  configCache = { value: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS }
+  return result
 }
 
 export async function setConfig(newConfig: Partial<AppConfig>): Promise<void> {

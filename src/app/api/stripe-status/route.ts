@@ -9,16 +9,17 @@ export async function GET() {
     const activeGateway = cfg.activeGateway || "stripe"
 
     // ─── AIRWALLEX ────────────────────────────────────────────────────────────
+    const cacheHeaders = { "Cache-Control": "public, max-age=30, stale-while-revalidate=60" }
+
     if (activeGateway === "airwallex" && cfg.airwallex?.clientId) {
       console.log('[gateway-status] ✅ Gateway attivo: Airwallex')
       return NextResponse.json({
         gatewayType: "airwallex",
         clientId: cfg.airwallex.clientId,
         environment: cfg.airwallex.environment,
-        // Retrocompatibilità: publishableKey vuoto per non rompere il frontend
         publishableKey: null,
         accountLabel: "Airwallex",
-      })
+      }, { headers: cacheHeaders })
     }
 
     // ─── STRIPE (comportamento originale) ─────────────────────────────────────
@@ -35,7 +36,7 @@ export async function GET() {
       totalSlots: info.totalSlots,
       nextRotation: info.nextRotation.toISOString(),
       nextRotationLocal: info.nextRotation.toLocaleString('it-IT'),
-    })
+    }, { headers: cacheHeaders })
   } catch (error: any) {
     console.error('[gateway-status] ❌ Errore:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
