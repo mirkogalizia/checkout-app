@@ -71,8 +71,20 @@ export async function POST(req: NextRequest) {
       const currency = (piData.currency || "EUR").toUpperCase()
       const sessionId = piData.metadata?.session_id
 
+      // Rileva metodo di pagamento (apple_pay / google_pay / card)
+      const rawMethod: string =
+        piData.payment_method_type ||
+        piData.latest_payment_attempt?.payment_method_type ||
+        piData.latest_payment_attempt?.payment_method?.type ||
+        ""
+      const paymentMethodTag =
+        rawMethod.toLowerCase().includes("apple") ? "apple-pay" :
+        rawMethod.toLowerCase().includes("google") ? "google-pay" :
+        "airwallex-card"
+
       console.log(`[airwallex-webhook] 💳 Intent ID: ${intentId}`)
       console.log(`[airwallex-webhook] 💰 Importo: €${amountRaw}`)
+      console.log(`[airwallex-webhook] 📱 Metodo: ${paymentMethodTag} (raw: "${rawMethod}")`)
 
       if (!sessionId) {
         console.error("[airwallex-webhook] ❌ NESSUN session_id!")
@@ -143,6 +155,9 @@ export async function POST(req: NextRequest) {
         console.log(`[airwallex-webhook] ℹ️ Già processato per sessione ${sessionId}`)
         return NextResponse.json({ received: true, alreadyProcessed: true }, { status: 200 })
       }
+
+      // Inietta il metodo di pagamento in sessionData (usato da createShopifyOrder per i tag)
+      sessionData = { ...sessionData, paymentMethodType: paymentMethodTag }
 
       console.log("[airwallex-webhook] 🚀 CREAZIONE ORDINE SHOPIFY...")
 
