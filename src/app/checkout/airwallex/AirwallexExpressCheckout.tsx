@@ -27,6 +27,8 @@ export default function AirwallexExpressCheckout({
   const [loading, setLoading] = useState(true)
   const [hidden, setHidden] = useState(false)
   const initRef = useRef(false)
+  const expressReadyRef = useRef(false)   // true appena riceviamo conferma express disponibile
+  const intentIdRef = useRef<string>("")  // salviamo l'intent_id per filtrare gli eventi
 
   useEffect(() => {
     if (initRef.current) return
@@ -62,15 +64,19 @@ export default function AirwallexExpressCheckout({
           methods: ["applepay", "googlepay"],
         })
 
+        intentIdRef.current = piData.intentId
+
         if (containerRef.current && element) {
           element.mount(containerRef.current)
           elementRef.current = element
         }
 
-        // Success
+        // Success — filtra per intent_id così non reagisce agli eventi del card drop-in
         window.addEventListener("onSuccess", ((e: CustomEvent) => {
-          console.log("[airwallex-express] ✅ Pagamento express completato:", e.detail)
           const detail = e.detail || {}
+          // Se l'evento ha un intent_id diverso dal nostro, ignoralo
+          if (detail.intent_id && detail.intent_id !== intentIdRef.current) return
+          console.log("[airwallex-express] ✅ Pagamento express completato:", detail)
           const billing = detail.billing || detail.payerDetail || {}
           const shipping = detail.shipping || billing
           if (billing.email || billing.name) {
@@ -96,28 +102,37 @@ export default function AirwallexExpressCheckout({
 
         // Error
         window.addEventListener("onError", ((e: CustomEvent) => {
-          console.error("[airwallex-express] ❌ Errore:", e.detail)
-          onError(e.detail?.message || "Errore nel pagamento")
+          const detail = e.detail || {}
+          if (detail.intent_id && detail.intent_id !== intentIdRef.current) return
+          console.error("[airwallex-express] ❌ Errore:", detail)
+          onError(detail?.message || "Errore nel pagamento")
         }) as EventListener)
 
-        // Ready — controlla se Apple Pay / Google Pay sono disponibili
+        // Ready — può scattare più volte (card drop-in + express drop-in)
+        // Usiamo expressReadyRef per assicurarci che una conferma positiva
+        // non venga sovrascritta da un successivo evento negativo
         window.addEventListener("onReady", ((e: CustomEvent) => {
-          console.log("[airwallex-express] onReady detail:", JSON.stringify(e.detail))
+          console.log("[airwallex-express] onReady:", JSON.stringify(e.detail))
           const available = e.detail?.availablePaymentMethods || {}
           const hasExpress =
             available.applepay || available.googlepay ||
             available.applePay || available.googlePay
           if (hasExpress) {
+            expressReadyRef.current = true
             setReady(true)
-          } else {
-            console.log("[airwallex-express] Nessun metodo express disponibile, nascondo")
+            setHidden(false)
+          } else if (!expressReadyRef.current) {
+            // Nascondi solo se non abbiamo già ricevuto un segnale positivo
             setHidden(true)
           }
           setLoading(false)
         }) as EventListener)
 
-        // Timeout fallback: dopo 5s nascondi il loading comunque
-        setTimeout(() => setLoading(false), 5000)
+        // Timeout fallback: dopo 6s se non abbiamo ricevuto risposta, nascondi
+        setTimeout(() => {
+          if (!expressReadyRef.current) setHidden(true)
+          setLoading(false)
+        }, 6000)
 
       } catch (err: any) {
         console.error("[airwallex-express] Errore init:", err)
