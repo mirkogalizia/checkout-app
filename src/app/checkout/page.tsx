@@ -1683,7 +1683,6 @@ function CheckoutInner({
                       sessionId={sessionId}
                       totalCents={totalToPayCents}
                       currency={currency}
-                      clientId={airwallexConfig.clientId}
                       environment={airwallexConfig.environment as "demo" | "prod"}
                       customer={customer}
                       onSuccess={() => {

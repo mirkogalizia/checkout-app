@@ -7,7 +7,6 @@ type AirwallexPaymentProps = {
   sessionId: string
   totalCents: number
   currency: string
-  clientId: string
   environment: "demo" | "prod"
   customer: {
     fullName: string
@@ -28,7 +27,6 @@ export default function AirwallexPayment({
   sessionId,
   totalCents,
   currency,
-  clientId,
   environment,
   customer,
   onSuccess,
@@ -79,7 +77,7 @@ export default function AirwallexPayment({
           style: {
             popupWidth: 400,
           },
-          methods: ["card", "applepay", "googlepay"],
+          methods: ["card"], // applepay/googlepay sono già nell'express checkout sopra
         })
 
         if (containerRef.current && element) {
@@ -94,8 +92,9 @@ export default function AirwallexPayment({
         }) as EventListener)
 
         window.addEventListener("onError", ((e: CustomEvent) => {
-          console.error("[airwallex] ❌ Errore pagamento:", e.detail)
-          onError(e.detail?.message || "Errore nel pagamento")
+          console.error("[airwallex] ❌ Errore pagamento:", JSON.stringify(e.detail))
+          const msg = e.detail?.message || e.detail?.error?.message || e.detail?.code || "Errore nel pagamento"
+          onError(msg)
         }) as EventListener)
 
         window.addEventListener("onReady", (() => {

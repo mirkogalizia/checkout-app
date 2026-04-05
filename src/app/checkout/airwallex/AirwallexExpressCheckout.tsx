@@ -102,15 +102,16 @@ export default function AirwallexExpressCheckout({
 
         // Ready — controlla se Apple Pay / Google Pay sono disponibili
         window.addEventListener("onReady", ((e: CustomEvent) => {
-          console.log("[airwallex-express] onReady:", e.detail)
+          console.log("[airwallex-express] onReady detail:", JSON.stringify(e.detail))
           const available = e.detail?.availablePaymentMethods || {}
           const hasExpress =
             available.applepay || available.googlepay ||
             available.applePay || available.googlePay
-          if (hasExpress === false) {
-            setHidden(true)
-          } else {
+          if (hasExpress) {
             setReady(true)
+          } else {
+            console.log("[airwallex-express] Nessun metodo express disponibile, nascondo")
+            setHidden(true)
           }
           setLoading(false)
         }) as EventListener)
