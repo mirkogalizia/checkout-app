@@ -42,7 +42,10 @@ export default function AirwallexExpressCheckout({
 
   const hasAny = hasApple || hasGoogle
 
-  async function fetchAndUpdateShipping(
+  // Aggiorna solo il display del foglio Apple Pay / Google Pay
+  // Il PI è già stato creato con subtotale + spedizione default, quindi
+  // l'importo addebitato è sempre corretto anche senza aggiornare il server
+  async function fetchAndUpdateDisplay(
     address: { city?: string; state?: string; postalCode?: string; countryCode?: string },
     elements: { apple?: any; google?: any },
   ) {
@@ -64,26 +67,11 @@ export default function AirwallexExpressCheckout({
       const newShippingCents: number = res.ok && data.shippingCents ? data.shippingCents : 590
       shippingCentsRef.current = newShippingCents
 
-      const newTotal = subtotalCents + newShippingCents
+      const displayTotal = subtotalCents + newShippingCents
       const shippingStr = centsToStr(newShippingCents)
-      const totalStr = centsToStr(newTotal)
 
-      // Aggiorna PI sul server con il nuovo importo
-      if (intentIdRef.current) {
-        await fetch("/api/airwallex-update-intent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            intentId: intentIdRef.current,
-            newAmountCents: newTotal,
-            sessionId,
-          }),
-        }).catch(() => {}) // non bloccante
-      }
-
-      // Aggiorna il foglio Apple Pay / Google Pay
       const updateOptions = {
-        amount: { value: newTotal / 100, currency: currency.toUpperCase() },
+        amount: { value: displayTotal / 100, currency: currency.toUpperCase() },
         lineItems: [
           { label: "Subtotale", amount: centsToStr(subtotalCents) },
           { label: "Spedizione BRT", amount: shippingStr },
@@ -101,7 +89,7 @@ export default function AirwallexExpressCheckout({
       elements.apple?.update?.(updateOptions)
       elements.google?.update?.(updateOptions)
 
-      console.log(`[airwallex-express] 🚚 Shipping calcolato: €${shippingStr}, nuovo totale: €${totalStr}`)
+      console.log(`[airwallex-express] display aggiornato: spedizione €${shippingStr}`)
     } catch (err: any) {
       console.warn("[airwallex-express] Errore calcolo shipping:", err.message)
     }
@@ -113,11 +101,14 @@ export default function AirwallexExpressCheckout({
 
     async function init() {
       try {
-        // Crea PI con il solo subtotale — lo aggiorneremo dopo con lo shipping
+        // Crea PI con subtotale + spedizione default (590 = €5.90 BRT Italia)
+        // Non aggiorniamo il PI server-side dopo — l'importo addebitato è questo
+        const DEFAULT_SHIPPING = 590
+        shippingCentsRef.current = DEFAULT_SHIPPING
         const piRes = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents: subtotalCents }),
+          body: JSON.stringify({ sessionId, amountCents: subtotalCents + DEFAULT_SHIPPING }),
         })
         const piData = await piRes.json()
 
@@ -139,19 +130,18 @@ export default function AirwallexExpressCheckout({
           client_secret: piData.clientSecret,
           mode: "payment",
           autoCapture: true,
-          amount: { value: subtotalCents / 100, currency: currency.toUpperCase() },
+          amount: { value: (subtotalCents + DEFAULT_SHIPPING) / 100, currency: currency.toUpperCase() },
           countryCode: "IT",
-          // Line items iniziali (solo subtotale, shipping = "Calcolando...")
           lineItems: [
             { label: "Subtotale", amount: centsToStr(subtotalCents) },
-            { label: "Spedizione", amount: "0.00" },
+            { label: "Spedizione BRT", amount: centsToStr(DEFAULT_SHIPPING) },
           ],
           shippingMethods: [
             {
               label: "Spedizione BRT Tracciata",
-              amount: "0.00",
+              amount: centsToStr(DEFAULT_SHIPPING),
               identifier: "brt",
-              detail: "24/48h — importo calcolato sull'indirizzo",
+              detail: "Consegna in 24/48h",
             },
           ],
         }
@@ -183,7 +173,7 @@ export default function AirwallexExpressCheckout({
             // Shipping address change — aggiorna totale
             appleEl.on("shippingAddressChange", async (e: any) => {
               const addr = e.detail?.shippingAddress || {}
-              await fetchAndUpdateShipping(
+              await fetchAndUpdateDisplay(
                 {
                   city: addr.locality || addr.city,
                   state: addr.administrativeArea || addr.state,
@@ -221,7 +211,7 @@ export default function AirwallexExpressCheckout({
 
             googleEl.on("shippingAddressChange", async (e: any) => {
               const addr = e.detail?.intermediatePaymentData?.shippingAddress || e.detail?.shippingAddress || {}
-              await fetchAndUpdateShipping(
+              await fetchAndUpdateDisplay(
                 {
                   city: addr.locality || addr.city,
                   state: addr.administrativeArea || addr.state,
