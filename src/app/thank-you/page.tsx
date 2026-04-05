@@ -125,10 +125,13 @@ function ThankYouContent() {
         }
 
         const subtotal = data.subtotalCents || 0
-        const shipping = 590
+        const shipping = data.shippingCents || 590
         let discount = 0
-        if (data.totalCents && data.totalCents < subtotal)
+        if (data.discountCents) {
+          discount = data.discountCents
+        } else if (data.totalCents && data.totalCents < subtotal) {
           discount = subtotal - data.totalCents
+        }
         const finalTotal = subtotal - discount + shipping
 
         setOrderData({
