@@ -253,35 +253,38 @@ export default function AirwallexExpressCheckout({
         }) as EventListener)
 
         // onSuccess — filtra per il nostro intent_id
-        window.addEventListener("onSuccess", ((e: CustomEvent) => {
-          const detail = e.detail || {}
+        window.addEventListener("onSuccess", (async (e: Event) => {
+          const detail = (e as CustomEvent).detail || {}
           if (detail.intent_id && detail.intent_id !== intentIdRef.current) return
           console.log("[airwallex-express] ✅ Pagamento express completato:", detail)
 
-          // Salva dati cliente in Firebase
+          // Salva dati cliente in Firebase — AWAIT per garantire che arrivino
+          // prima del webhook Airwallex (che legge Firebase subito dopo il pagamento)
           const billing = detail.billing || detail.payerDetail || {}
-          const shipping = detail.shipping || billing
-          if (billing.email || billing.name) {
-            const customerData = {
-              fullName: billing.name || "",
-              email: billing.email || "",
-              phone: billing.phone || "",
-              address1: shipping?.address?.line1 || shipping?.address?.street || "",
-              address2: shipping?.address?.line2 || "",
-              city: shipping?.address?.city || "",
-              province: shipping?.address?.state || "",
-              postalCode: shipping?.address?.postCode || shipping?.address?.postalCode || "",
-              countryCode: shipping?.address?.countryCode || "IT",
-            }
-            fetch(`/api/cart-session?sessionId=${sessionId}`, {
+          const shipping = detail.shipping || detail.shippingAddress || billing
+          const customerData = {
+            fullName: billing.name || shipping?.name || "",
+            email: billing.email || "",
+            phone: billing.phone || shipping?.phoneNumber || "",
+            address1: shipping?.address?.line1 || shipping?.address?.street || billing?.address?.line1 || "",
+            address2: shipping?.address?.line2 || billing?.address?.line2 || "",
+            city: shipping?.address?.city || billing?.address?.city || "",
+            province: shipping?.address?.state || billing?.address?.state || "",
+            postalCode: shipping?.address?.postCode || shipping?.address?.postalCode || billing?.address?.postCode || "",
+            countryCode: shipping?.address?.countryCode || billing?.address?.countryCode || "IT",
+          }
+          console.log("[airwallex-express] 📦 Customer data estratto:", customerData)
+          try {
+            await fetch(`/api/cart-session?sessionId=${sessionId}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 customer: customerData,
                 shippingCents: shippingCentsRef.current,
               }),
-            }).catch(() => {})
-          }
+            })
+            console.log("[airwallex-express] ✅ Customer salvato su Firebase")
+          } catch {}
 
           onSuccess()
         }) as EventListener)

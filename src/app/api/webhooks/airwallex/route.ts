@@ -86,7 +86,41 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ received: true, error: "session_not_found" }, { status: 200 })
       }
 
-      const sessionData: any = snap.data() || {}
+      let sessionData: any = snap.data() || {}
+
+      // Se il cliente non è ancora in Firebase (race condition con Apple Pay),
+      // aspetta 3s e ri-legge — il client salva i dati subito dopo il pagamento
+      if (!sessionData.customer?.fullName && !sessionData.customer?.email) {
+        console.log("[airwallex-webhook] ⏳ Customer non ancora in Firebase, attendo 3s...")
+        await new Promise(r => setTimeout(r, 3000))
+        const snap2 = await db.collection(COLLECTION).doc(sessionId).get()
+        sessionData = snap2.data() || {}
+        console.log("[airwallex-webhook] 🔄 Customer dopo attesa:", sessionData.customer?.fullName || "ancora vuoto")
+      }
+
+      // Prova anche a estrarre dati cliente dal payload del webhook Airwallex
+      if (!sessionData.customer?.fullName) {
+        const wpBilling = piData.billing || piData.customer_billing_details || {}
+        const wpShipping = piData.shipping || piData.customer_shipping_details || wpBilling
+        if (wpBilling.name || wpBilling.email || wpShipping?.address) {
+          const addr = wpShipping?.address || wpBilling?.address || {}
+          sessionData = {
+            ...sessionData,
+            customer: {
+              fullName: wpBilling.name || wpShipping?.name || "",
+              email: wpBilling.email || "",
+              phone: wpBilling.phone || wpShipping?.phone || "",
+              address1: addr.line1 || addr.street || "",
+              address2: addr.line2 || "",
+              city: addr.city || "",
+              province: addr.state || "",
+              postalCode: addr.postCode || addr.postal_code || "",
+              countryCode: addr.countryCode || addr.country || "IT",
+            },
+          }
+          console.log("[airwallex-webhook] 📦 Customer estratto da payload webhook:", sessionData.customer.fullName)
+        }
+      }
 
       // ── LOCK TRANSAZIONALE ────────────────────────────────────────────
       const sessionRef = db.collection(COLLECTION).doc(sessionId)
