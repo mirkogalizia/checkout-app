@@ -644,6 +644,7 @@ function CheckoutInner({
   const addressInputRef = useRef<HTMLInputElement>(null)
   const autocompleteRef = useRef<any>(null)
   const scriptLoadedRef = useRef(false)
+  const airwallexConfirmRef = useRef<(() => Promise<void>) | null>(null)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
@@ -955,8 +956,22 @@ function CheckoutInner({
       return
     }
 
-    // Il submit del form è solo per Stripe — Airwallex usa il Drop-in
-    if (gatewayType === "airwallex") return
+    // Airwallex: conferma tramite card element
+    if (gatewayType === "airwallex") {
+      if (!airwallexConfirmRef.current) {
+        setError("Elemento carta non pronto")
+        return
+      }
+      setLoading(true)
+      try {
+        await airwallexConfirmRef.current()
+        // onSuccess è gestito dall'event listener in AirwallexPayment
+      } catch (err: any) {
+        setError(err?.message || "Errore nel pagamento")
+        setLoading(false)
+      }
+      return
+    }
 
     if (!stripe || !elements) {
       setError("Stripe non pronto")
@@ -1676,19 +1691,19 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* ── AIRWALLEX DROP-IN ─────────────────────────────── */}
+                {/* ── AIRWALLEX CARD ELEMENT ────────────────────────── */}
                 {gatewayType === "airwallex" && airwallexConfig && !isCalculatingShipping && (
                   <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
                     <AirwallexPayment
                       sessionId={sessionId}
                       totalCents={totalToPayCents}
-                      currency={currency}
                       environment={airwallexConfig.environment as "demo" | "prod"}
                       customer={customer}
                       onSuccess={() => {
                         window.location.href = `/thank-you?sessionId=${sessionId}`
                       }}
-                      onError={(msg) => setError(msg)}
+                      onError={(msg) => { setError(msg); setLoading(false) }}
+                      onConfirmReady={(fn) => { airwallexConfirmRef.current = fn }}
                     />
                   </div>
                 )}
@@ -1755,13 +1770,16 @@ function CheckoutInner({
               {/* CTA BUTTON */}
               <button
                 type="submit"
-                disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
+                disabled={
+                  loading || isCalculatingShipping ||
+                  (gatewayType === "stripe" && (!stripe || !elements || !clientSecret))
+                }
                 className="w-full py-4 px-6 text-base font-semibold text-white rounded-2xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
-                  background: loading || !clientSecret
+                  background: loading || (gatewayType === "stripe" && !clientSecret)
                     ? "#9ca3af"
                     : "linear-gradient(135deg, #1d1d1f 0%, #3d3d3f 100%)",
-                  boxShadow: loading || !clientSecret ? "none" : "0 4px 20px rgba(0,0,0,0.2)",
+                  boxShadow: loading || (gatewayType === "stripe" && !clientSecret) ? "none" : "0 4px 20px rgba(0,0,0,0.2)",
                 }}
               >
                 {loading ? (
@@ -1777,7 +1795,9 @@ function CheckoutInner({
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                     </svg>
-                    {geo.labels.pay} · {formatMoney(totalToPayCents, currency)}
+                    {gatewayType === "airwallex"
+                      ? `Concludi il tuo ordine · ${formatMoney(totalToPayCents, currency)}`
+                      : `${geo.labels.pay} · ${formatMoney(totalToPayCents, currency)}`}
                   </span>
                 )}
               </button>
@@ -1803,7 +1823,9 @@ function CheckoutInner({
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                 </svg>
-                Crittografia SSL 256-bit · Powered by Stripe · PCI DSS Level 1
+                {gatewayType === "airwallex"
+                  ? "Crittografia SSL 256-bit · Powered by Airwallex · PCI DSS Level 1"
+                  : "Crittografia SSL 256-bit · Powered by Stripe · PCI DSS Level 1"}
               </p>
             </form>
           </div>

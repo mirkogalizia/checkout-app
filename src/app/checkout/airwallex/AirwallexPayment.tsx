@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react"
 type AirwallexPaymentProps = {
   sessionId: string
   totalCents: number
-  currency: string
   environment: "demo" | "prod"
   customer: {
     fullName: string
@@ -21,22 +20,27 @@ type AirwallexPaymentProps = {
   }
   onSuccess: () => void
   onError: (msg: string) => void
+  // Callback chiamato quando l'elemento card è pronto —
+  // passa una funzione che il checkout usa per confermare il pagamento
+  onConfirmReady: (confirmFn: () => Promise<void>) => void
 }
 
 export default function AirwallexPayment({
   sessionId,
   totalCents,
-  currency,
   environment,
   customer,
   onSuccess,
   onError,
+  onConfirmReady,
 }: AirwallexPaymentProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [loading, setLoading] = useState(false)
-  const [ready, setReady] = useState(false)
   const elementRef = useRef<any>(null)
+  const airwallexRef = useRef<any>(null)
+  const piDataRef = useRef<{ clientSecret: string; intentId: string } | null>(null)
   const initRef = useRef(false)
+  const [loading, setLoading] = useState(true)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
     if (initRef.current) return
@@ -50,11 +54,7 @@ export default function AirwallexPayment({
         const piRes = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            amountCents: totalCents,
-            customer,
-          }),
+          body: JSON.stringify({ sessionId, amountCents: totalCents, customer }),
         })
         const piData = await piRes.json()
 
@@ -63,21 +63,15 @@ export default function AirwallexPayment({
           return
         }
 
-        // Carica Airwallex SDK (singleton condiviso con express checkout)
-        const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
+        piDataRef.current = { clientSecret: piData.clientSecret, intentId: piData.intentId }
 
-        // Crea Drop-in element
+        const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
+        airwallexRef.current = Airwallex
+
+        // Usa l'elemento "card" — solo campi carta, senza pulsante incorporato
         const { createElement } = Airwallex
-        const element = createElement("dropIn", {
-          intent_id: piData.intentId,
-          client_secret: piData.clientSecret,
-          currency: currency.toLowerCase(),
-          mode: "payment",
+        const element = createElement("card", {
           autoCapture: true,
-          style: {
-            popupWidth: 400,
-          },
-          methods: ["card"], // applepay/googlepay sono già nell'express checkout sopra
         })
 
         if (containerRef.current && element) {
@@ -85,20 +79,37 @@ export default function AirwallexPayment({
           elementRef.current = element
         }
 
-        // Event listeners
+        // Esponi la funzione di conferma al checkout page
+        onConfirmReady(async () => {
+          if (!piDataRef.current || !elementRef.current) {
+            throw new Error("Elemento carta non pronto")
+          }
+          await airwallexRef.current.confirmPaymentIntent({
+            element: elementRef.current,
+            client_secret: piDataRef.current.clientSecret,
+            intent_id: piDataRef.current.intentId,
+          })
+        })
+
+        // Events
         window.addEventListener("onSuccess", ((e: CustomEvent) => {
-          console.log("[airwallex] ✅ Pagamento completato:", e.detail)
+          const detail = e.detail || {}
+          // Filtra per il nostro intent_id
+          if (detail.intent_id && detail.intent_id !== piDataRef.current?.intentId) return
+          console.log("[airwallex] ✅ Pagamento completato:", detail)
           onSuccess()
         }) as EventListener)
 
         window.addEventListener("onError", ((e: CustomEvent) => {
-          console.error("[airwallex] ❌ Errore pagamento:", JSON.stringify(e.detail))
-          const msg = e.detail?.message || e.detail?.error?.message || e.detail?.code || "Errore nel pagamento"
+          const detail = e.detail || {}
+          if (detail.intent_id && detail.intent_id !== piDataRef.current?.intentId) return
+          console.error("[airwallex] ❌ Errore pagamento:", detail)
+          const msg = detail?.message || detail?.error?.message || detail?.code || "Errore nel pagamento"
           onError(msg)
         }) as EventListener)
 
         window.addEventListener("onReady", (() => {
-          console.log("[airwallex] ✅ Drop-in pronto")
+          console.log("[airwallex] ✅ Card element pronto")
           setReady(true)
           setLoading(false)
         }) as EventListener)
@@ -113,11 +124,7 @@ export default function AirwallexPayment({
     init()
 
     return () => {
-      if (elementRef.current) {
-        try {
-          elementRef.current?.unmount()
-        } catch {}
-      }
+      try { elementRef.current?.unmount() } catch {}
     }
   }, [])
 
