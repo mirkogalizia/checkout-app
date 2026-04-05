@@ -131,26 +131,53 @@ export function verifyAirwallexWebhook(
 ): { isValid: boolean; format: string } {
   const crypto = require("crypto")
 
-  const candidates: { label: string; payload: string }[] = [
-    { label: "timestamp+body",     payload: `${timestamp}${body}` },
-    { label: "timestamp.body",     payload: `${timestamp}.${body}` },
-    { label: "body-only",          payload: body },
+  // Timestamp in secondi (nel caso Airwallex mandi ms)
+  const timestampSec = timestamp.length > 10
+    ? String(Math.floor(Number(timestamp) / 1000))
+    : timestamp
+
+  // Prova anche con il secret base64-decodificato
+  let secretBuffer: Buffer | null = null
+  try {
+    secretBuffer = Buffer.from(secret, "base64")
+  } catch {}
+
+  const payloads: { label: string; payload: string }[] = [
+    { label: "timestamp_ms+body",      payload: `${timestamp}${body}` },
+    { label: "timestamp_ms.body",      payload: `${timestamp}.${body}` },
+    { label: "timestamp_sec+body",     payload: `${timestampSec}${body}` },
+    { label: "timestamp_sec.body",     payload: `${timestampSec}.${body}` },
+    { label: "body-only",              payload: body },
   ]
 
-  for (const { label, payload } of candidates) {
-    const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex")
-    if (expected === signature) return { isValid: true, format: label }
+  const encodings: ("hex" | "base64")[] = ["hex", "base64"]
+  const secrets: { label: string; key: string | Buffer }[] = [
+    { label: "raw",    key: secret },
+    ...(secretBuffer ? [{ label: "b64decoded", key: secretBuffer }] : []),
+  ]
+
+  for (const { label: enc } of encodings.map(e => ({ label: e }))) {
+    for (const { label: secLabel, key } of secrets) {
+      for (const { label: payLabel, payload } of payloads) {
+        const expected = crypto.createHmac("sha256", key).update(payload).digest(enc as any)
+        if (expected === signature) {
+          return { isValid: true, format: `${payLabel}|secret:${secLabel}|enc:${enc}` }
+        }
+      }
+    }
   }
 
-  // Log per debug (prime 20 chars di signature e expected del primo formato)
-  const debugExpected = crypto
-    .createHmac("sha256", secret)
-    .update(`${timestamp}${body}`)
-    .digest("hex")
-  console.error("[airwallex-verify] received:", signature.substring(0, 20))
-  console.error("[airwallex-verify] expected (timestamp+body):", debugExpected.substring(0, 20))
+  // Log debug
+  console.error("[airwallex-verify] signature received (full length):", signature.length, "chars")
+  console.error("[airwallex-verify] received:", signature)
+  console.error("[airwallex-verify] timestamp:", timestamp, "→ sec:", timestampSec)
   console.error("[airwallex-verify] secret length:", secret.length)
-  console.error("[airwallex-verify] timestamp:", timestamp)
+  console.error("[airwallex-verify] expected (timestamp_ms+body, hex):",
+    crypto.createHmac("sha256", secret).update(`${timestamp}${body}`).digest("hex")
+  )
+  console.error("[airwallex-verify] expected (timestamp_ms+body, base64):",
+    crypto.createHmac("sha256", secret).update(`${timestamp}${body}`).digest("base64")
+  )
 
   return { isValid: false, format: "none" }
 }
