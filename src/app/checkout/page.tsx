@@ -1266,7 +1266,7 @@ function CheckoutInner({
             {gatewayType === "airwallex" && airwallexConfig && (
               <AirwallexExpressCheckout
                 sessionId={sessionId}
-                totalCents={totalToPayCents}
+                subtotalCents={subtotalCents - discountCents}
                 currency={currency}
                 environment={airwallexConfig.environment as "demo" | "prod"}
                 onSuccess={() => {

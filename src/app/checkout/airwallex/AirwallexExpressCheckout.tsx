@@ -6,16 +6,20 @@ import { getAirwallexSDK } from "@/lib/airwallexSDK"
 
 type AirwallexExpressCheckoutProps = {
   sessionId: string
-  totalCents: number
+  subtotalCents: number   // solo prodotti (senza spedizione)
   currency: string
   environment: "demo" | "prod"
   onSuccess: () => void
   onError: (msg: string) => void
 }
 
+function centsToStr(cents: number): string {
+  return (cents / 100).toFixed(2)
+}
+
 export default function AirwallexExpressCheckout({
   sessionId,
-  totalCents,
+  subtotalCents,
   currency,
   environment,
   onSuccess,
@@ -27,14 +31,81 @@ export default function AirwallexExpressCheckout({
   const googleElementRef = useRef<any>(null)
   const initRef = useRef(false)
   const intentIdRef = useRef<string>("")
+  const intentClientSecretRef = useRef<string>("")
+  // shippingCents corrente (aggiornato dopo shippingAddressChange)
+  const shippingCentsRef = useRef<number>(0)
 
   const [loading, setLoading] = useState(true)
   const [hasApple, setHasApple] = useState(false)
   const [hasGoogle, setHasGoogle] = useState(false)
-  // initFailed: true se la creazione del PI fallisce — nascondiamo subito
   const [initFailed, setInitFailed] = useState(false)
 
   const hasAny = hasApple || hasGoogle
+
+  async function fetchAndUpdateShipping(
+    address: { city?: string; state?: string; postalCode?: string; countryCode?: string },
+    elements: { apple?: any; google?: any },
+  ) {
+    try {
+      const res = await fetch("/api/calculate-shipping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          destination: {
+            city: address.city || "",
+            province: address.state || "",
+            postalCode: address.postalCode || "",
+            countryCode: address.countryCode || "IT",
+          },
+        }),
+      })
+      const data = await res.json()
+      const newShippingCents: number = res.ok && data.shippingCents ? data.shippingCents : 590
+      shippingCentsRef.current = newShippingCents
+
+      const newTotal = subtotalCents + newShippingCents
+      const shippingStr = centsToStr(newShippingCents)
+      const totalStr = centsToStr(newTotal)
+
+      // Aggiorna PI sul server con il nuovo importo
+      if (intentIdRef.current) {
+        await fetch("/api/airwallex-update-intent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            intentId: intentIdRef.current,
+            newAmountCents: newTotal,
+            sessionId,
+          }),
+        }).catch(() => {}) // non bloccante
+      }
+
+      // Aggiorna il foglio Apple Pay / Google Pay
+      const updateOptions = {
+        amount: { value: newTotal / 100, currency: currency.toUpperCase() },
+        lineItems: [
+          { label: "Subtotale", amount: centsToStr(subtotalCents) },
+          { label: "Spedizione BRT", amount: shippingStr },
+        ],
+        shippingMethods: [
+          {
+            label: "Spedizione BRT Tracciata",
+            amount: shippingStr,
+            identifier: "brt",
+            detail: `Consegna in 24/48h — €${shippingStr}`,
+          },
+        ],
+      }
+
+      elements.apple?.update?.(updateOptions)
+      elements.google?.update?.(updateOptions)
+
+      console.log(`[airwallex-express] 🚚 Shipping calcolato: €${shippingStr}, nuovo totale: €${totalStr}`)
+    } catch (err: any) {
+      console.warn("[airwallex-express] Errore calcolo shipping:", err.message)
+    }
+  }
 
   useEffect(() => {
     if (initRef.current) return
@@ -42,11 +113,11 @@ export default function AirwallexExpressCheckout({
 
     async function init() {
       try {
-        // Crea PaymentIntent server-side (condiviso tra Apple Pay e Google Pay)
+        // Crea PI con il solo subtotale — lo aggiorneremo dopo con lo shipping
         const piRes = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents: totalCents }),
+          body: JSON.stringify({ sessionId, amountCents: subtotalCents }),
         })
         const piData = await piRes.json()
 
@@ -57,25 +128,38 @@ export default function AirwallexExpressCheckout({
           return
         }
 
-        const { intentId, clientSecret } = piData
-        intentIdRef.current = intentId
-        const amountValue = totalCents / 100
+        intentIdRef.current = piData.intentId
+        intentClientSecretRef.current = piData.clientSecret
 
         const Airwallex = await getAirwallexSDK(environment)
         const { createElement } = Airwallex
 
         const baseOptions = {
-          intent_id: intentId,
-          client_secret: clientSecret,
+          intent_id: piData.intentId,
+          client_secret: piData.clientSecret,
           mode: "payment",
           autoCapture: true,
-          amount: { value: amountValue, currency: currency.toUpperCase() },
+          amount: { value: subtotalCents / 100, currency: currency.toUpperCase() },
           countryCode: "IT",
+          // Line items iniziali (solo subtotale, shipping = "Calcolando...")
+          lineItems: [
+            { label: "Subtotale", amount: centsToStr(subtotalCents) },
+            { label: "Spedizione", amount: "0.00" },
+          ],
+          shippingMethods: [
+            {
+              label: "Spedizione BRT Tracciata",
+              amount: "0.00",
+              identifier: "brt",
+              detail: "24/48h — importo calcolato sull'indirizzo",
+            },
+          ],
         }
 
-        // ── APPLE PAY ────────────────────────────────────────────────────
+        // ── APPLE PAY ──────────────────────────────────────────────────
+        let appleEl: any = null
         try {
-          const appleEl = createElement("applePayButton", {
+          appleEl = createElement("applePayButton", {
             ...baseOptions,
             buttonColor: "black",
             buttonType: "pay",
@@ -84,73 +168,84 @@ export default function AirwallexExpressCheckout({
           if (appleRef.current && appleEl) {
             appleEl.mount(appleRef.current)
             appleElementRef.current = appleEl
-            console.log("[airwallex-express] 🍎 applePayButton montato")
 
-            // ResizeObserver: se il container acquisisce altezza, il button è visibile
             const ro = new ResizeObserver((entries) => {
               for (const entry of entries) {
                 if (entry.contentRect.height > 0) {
-                  console.log("[airwallex-express] ✅ Apple Pay visibile (height:", entry.contentRect.height, ")")
+                  console.log("[airwallex-express] ✅ Apple Pay visibile")
                   setHasApple(true)
                   ro.disconnect()
                 }
               }
             })
             ro.observe(appleRef.current)
+
+            // Shipping address change — aggiorna totale
+            appleEl.on("shippingAddressChange", async (e: any) => {
+              const addr = e.detail?.shippingAddress || {}
+              await fetchAndUpdateShipping(
+                {
+                  city: addr.locality || addr.city,
+                  state: addr.administrativeArea || addr.state,
+                  postalCode: addr.postalCode,
+                  countryCode: addr.countryCode || "IT",
+                },
+                { apple: appleEl, google: googleElementRef.current },
+              )
+            })
           }
         } catch (appleErr: any) {
           console.warn("[airwallex-express] applePayButton non disponibile:", appleErr.message)
         }
 
-        // ── GOOGLE PAY ───────────────────────────────────────────────────
+        // ── GOOGLE PAY ─────────────────────────────────────────────────
+        let googleEl: any = null
         try {
-          const googleEl = createElement("googlePayButton", {
+          googleEl = createElement("googlePayButton", {
             ...baseOptions,
           })
           if (googleRef.current && googleEl) {
             googleEl.mount(googleRef.current)
             googleElementRef.current = googleEl
-            console.log("[airwallex-express] 🤖 googlePayButton montato")
 
             const ro = new ResizeObserver((entries) => {
               for (const entry of entries) {
                 if (entry.contentRect.height > 0) {
-                  console.log("[airwallex-express] ✅ Google Pay visibile (height:", entry.contentRect.height, ")")
+                  console.log("[airwallex-express] ✅ Google Pay visibile")
                   setHasGoogle(true)
                   ro.disconnect()
                 }
               }
             })
             ro.observe(googleRef.current)
+
+            googleEl.on("shippingAddressChange", async (e: any) => {
+              const addr = e.detail?.intermediatePaymentData?.shippingAddress || e.detail?.shippingAddress || {}
+              await fetchAndUpdateShipping(
+                {
+                  city: addr.locality || addr.city,
+                  state: addr.administrativeArea || addr.state,
+                  postalCode: addr.postalCode,
+                  countryCode: addr.countryCode || "IT",
+                },
+                { apple: appleElementRef.current, google: googleEl },
+              )
+            })
           }
         } catch (googleErr: any) {
           console.warn("[airwallex-express] googlePayButton non disponibile:", googleErr.message)
         }
 
-        // ── EVENTI ───────────────────────────────────────────────────────
-        // onReady: ogni elemento express può mandare il proprio stato
+        // ── EVENTI GLOBALI ─────────────────────────────────────────────
         window.addEventListener("onReady", ((e: CustomEvent) => {
           const detail = e.detail || {}
           const available = detail.availablePaymentMethods || {}
           console.log("[airwallex-express] onReady:", JSON.stringify(detail))
 
-          if (
-            available.applepay === true ||
-            available.applePay === true ||
-            available.applePayButton === true ||
-            detail.type === "applePayButton"
-          ) {
-            console.log("[airwallex-express] ✅ Apple Pay disponibile (onReady)")
+          if (available.applepay === true || available.applePay === true || available.applePayButton === true || detail.type === "applePayButton") {
             setHasApple(true)
           }
-
-          if (
-            available.googlepay === true ||
-            available.googlePay === true ||
-            available.googlePayButton === true ||
-            detail.type === "googlePayButton"
-          ) {
-            console.log("[airwallex-express] ✅ Google Pay disponibile (onReady)")
+          if (available.googlepay === true || available.googlePay === true || available.googlePayButton === true || detail.type === "googlePayButton") {
             setHasGoogle(true)
           }
 
@@ -163,7 +258,7 @@ export default function AirwallexExpressCheckout({
           if (detail.intent_id && detail.intent_id !== intentIdRef.current) return
           console.log("[airwallex-express] ✅ Pagamento express completato:", detail)
 
-          // Salva dati cliente da Apple/Google Pay in Firebase
+          // Salva dati cliente in Firebase
           const billing = detail.billing || detail.payerDetail || {}
           const shipping = detail.shipping || billing
           if (billing.email || billing.name) {
@@ -181,7 +276,10 @@ export default function AirwallexExpressCheckout({
             fetch(`/api/cart-session?sessionId=${sessionId}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ customer: customerData }),
+              body: JSON.stringify({
+                customer: customerData,
+                shippingCents: shippingCentsRef.current,
+              }),
             }).catch(() => {})
           }
 
@@ -196,7 +294,7 @@ export default function AirwallexExpressCheckout({
           onError(detail?.message || "Errore nel pagamento")
         }) as EventListener)
 
-        // Timeout: dopo 10s rimuovi lo spinner
+        // Timeout spinner
         setTimeout(() => setLoading(false), 10000)
 
       } catch (err: any) {
@@ -214,10 +312,7 @@ export default function AirwallexExpressCheckout({
     }
   }, [])
 
-  // Nascondi tutto se init fallita
   if (initFailed) return null
-
-  // Nascondi se caricamento finito e nessun metodo express disponibile
   if (!loading && !hasAny) return null
 
   return (
@@ -233,16 +328,8 @@ export default function AirwallexExpressCheckout({
           </div>
         )}
 
-        {/* Containers sempre nel DOM — lo SDK decide se renderizza il pulsante */}
-        <div
-          ref={appleRef}
-          id="airwallex-applepay"
-          style={{ marginBottom: hasApple && hasGoogle ? 8 : 0 }}
-        />
-        <div
-          ref={googleRef}
-          id="airwallex-googlepay"
-        />
+        <div ref={appleRef} id="airwallex-applepay" style={{ marginBottom: hasApple && hasGoogle ? 8 : 0 }} />
+        <div ref={googleRef} id="airwallex-googlepay" />
       </div>
 
       {hasAny && (
