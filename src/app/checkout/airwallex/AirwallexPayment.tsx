@@ -7,6 +7,8 @@ type AirwallexPaymentProps = {
   sessionId: string
   totalCents: number
   environment: "demo" | "prod"
+  clientSecret: string
+  intentId: string
   customer: {
     fullName: string
     email: string
@@ -20,8 +22,6 @@ type AirwallexPaymentProps = {
   }
   onSuccess: () => void
   onError: (msg: string) => void
-  // Callback chiamato quando l'elemento card è pronto —
-  // passa una funzione che il checkout usa per confermare il pagamento
   onConfirmReady: (confirmFn: () => Promise<void>) => void
 }
 
@@ -35,10 +35,9 @@ const fieldStyle = {
 }
 
 export default function AirwallexPayment({
-  sessionId,
-  totalCents,
   environment,
-  customer,
+  clientSecret,
+  intentId,
   onSuccess,
   onError,
   onConfirmReady,
@@ -49,7 +48,6 @@ export default function AirwallexPayment({
 
   const cardNumberElRef = useRef<any>(null)
   const airwallexRef = useRef<any>(null)
-  const piDataRef = useRef<{ clientSecret: string; intentId: string } | null>(null)
   const initRef = useRef(false)
   const [loading, setLoading] = useState(true)
   const [ready, setReady] = useState(false)
@@ -62,29 +60,11 @@ export default function AirwallexPayment({
       try {
         setLoading(true)
 
-        // Crea PI e carica SDK in parallelo
-        const [piRes, Airwallex] = await Promise.all([
-          fetch("/api/payment-intent", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionId, amountCents: totalCents, customer }),
-          }),
-          import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment)),
-        ])
-
-        const piData = await piRes.json()
-
-        if (!piRes.ok || !piData.clientSecret) {
-          onError(piData.error || "Errore creazione pagamento")
-          return
-        }
-
-        piDataRef.current = { clientSecret: piData.clientSecret, intentId: piData.intentId }
+        const Airwallex = await import("@/lib/airwallexSDK").then(m => m.getAirwallexSDK(environment))
         airwallexRef.current = Airwallex
 
         const { createElement } = Airwallex
 
-        // Crea i 3 elementi separati
         const cardNumberEl = createElement("cardNumber", { style: fieldStyle, autoCapture: true })
         const expiryEl = createElement("expiry", { style: fieldStyle })
         const cvcEl = createElement("cvc", { style: fieldStyle })
@@ -95,29 +75,25 @@ export default function AirwallexPayment({
 
         cardNumberElRef.current = cardNumberEl
 
-        // Esponi la funzione di conferma al checkout page
         onConfirmReady(async () => {
-          if (!piDataRef.current || !cardNumberElRef.current) {
-            throw new Error("Elemento carta non pronto")
-          }
+          if (!cardNumberElRef.current) throw new Error("Elemento carta non pronto")
           await airwallexRef.current.confirmPaymentIntent({
             element: cardNumberElRef.current,
-            client_secret: piDataRef.current.clientSecret,
-            intent_id: piDataRef.current.intentId,
+            client_secret: clientSecret,
+            intent_id: intentId,
           })
         })
 
-        // Events
         window.addEventListener("onSuccess", ((e: CustomEvent) => {
           const detail = e.detail || {}
-          if (detail.intent_id && detail.intent_id !== piDataRef.current?.intentId) return
+          if (detail.intent_id && detail.intent_id !== intentId) return
           console.log("[airwallex] ✅ Pagamento completato:", detail)
           onSuccess()
         }) as EventListener)
 
         window.addEventListener("onError", ((e: CustomEvent) => {
           const detail = e.detail || {}
-          if (detail.intent_id && detail.intent_id !== piDataRef.current?.intentId) return
+          if (detail.intent_id && detail.intent_id !== intentId) return
           console.error("[airwallex] ❌ Errore pagamento:", detail)
           const msg = detail?.message || detail?.error?.message || detail?.code || "Errore nel pagamento"
           onError(msg)
@@ -153,7 +129,6 @@ export default function AirwallexPayment({
       )}
 
       <div style={{ opacity: ready ? 1 : 0, transition: "opacity 0.3s" }}>
-        {/* Numero carta — riga intera */}
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-500 mb-1">Numero carta</label>
           <div
@@ -163,7 +138,6 @@ export default function AirwallexPayment({
           />
         </div>
 
-        {/* Scadenza + CVC — mezza riga ciascuno */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Scadenza</label>

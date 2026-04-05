@@ -615,6 +615,7 @@ function CheckoutInner({
   const [calculatedShippingCents, setCalculatedShippingCents] = useState<number>(0)
   const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
   const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [airwallexIntentId, setAirwallexIntentId] = useState<string | null>(null)
   const [shippingError, setShippingError] = useState<string | null>(null)
   const [expressPaymentReady, setExpressPaymentReady] = useState(false)
 
@@ -855,6 +856,7 @@ function CheckoutInner({
       if (!isFormValid()) {
         setCalculatedShippingCents(0)
         setClientSecret(null)
+        setAirwallexIntentId(null)
         setShippingError(null)
         setLastCalculatedHash("")
         return
@@ -921,6 +923,7 @@ function CheckoutInner({
           }
 
           setClientSecret(piData.clientSecret)
+          if (piData.intentId) setAirwallexIntentId(piData.intentId)
           setLastCalculatedHash(formHash)
           setIsCalculatingShipping(false)
         } catch (err: any) {
@@ -1692,12 +1695,14 @@ function CheckoutInner({
                 )}
 
                 {/* ── AIRWALLEX CARD ELEMENT ────────────────────────── */}
-                {gatewayType === "airwallex" && airwallexConfig && !isCalculatingShipping && (
+                {gatewayType === "airwallex" && airwallexConfig && clientSecret && airwallexIntentId && !isCalculatingShipping && (
                   <div className="border border-gray-100 rounded-xl overflow-hidden bg-gray-50/50 p-4 mb-4">
                     <AirwallexPayment
                       sessionId={sessionId}
                       totalCents={totalToPayCents}
                       environment={airwallexConfig.environment as "demo" | "prod"}
+                      clientSecret={clientSecret}
+                      intentId={airwallexIntentId}
                       customer={customer}
                       onSuccess={() => {
                         window.location.href = `/thank-you?sessionId=${sessionId}`
@@ -1705,6 +1710,15 @@ function CheckoutInner({
                       onError={(msg) => { setError(msg); setLoading(false) }}
                       onConfirmReady={(fn) => { airwallexConfirmRef.current = fn }}
                     />
+                  </div>
+                )}
+
+                {gatewayType === "airwallex" && (!clientSecret || !airwallexIntentId) && !isCalculatingShipping && (
+                  <div className="p-5 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center mb-4">
+                    <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <p className="text-sm text-gray-400 font-medium">Compila tutti i campi per sbloccare il pagamento</p>
                   </div>
                 )}
 
@@ -1772,14 +1786,15 @@ function CheckoutInner({
                 type="submit"
                 disabled={
                   loading || isCalculatingShipping ||
-                  (gatewayType === "stripe" && (!stripe || !elements || !clientSecret))
+                  (gatewayType === "stripe" && (!stripe || !elements || !clientSecret)) ||
+                  (gatewayType === "airwallex" && (!clientSecret || !airwallexIntentId))
                 }
                 className="w-full py-4 px-6 text-base font-semibold text-white rounded-2xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
-                  background: loading || (gatewayType === "stripe" && !clientSecret)
+                  background: loading || !clientSecret
                     ? "#9ca3af"
                     : "linear-gradient(135deg, #1d1d1f 0%, #3d3d3f 100%)",
-                  boxShadow: loading || (gatewayType === "stripe" && !clientSecret) ? "none" : "0 4px 20px rgba(0,0,0,0.2)",
+                  boxShadow: loading || !clientSecret ? "none" : "0 4px 20px rgba(0,0,0,0.2)",
                 }}
               >
                 {loading ? (
