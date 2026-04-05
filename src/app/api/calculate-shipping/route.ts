@@ -144,7 +144,6 @@ export async function POST(req: NextRequest) {
 async function calculateShippingWithAdmin({
   shopifyDomain,
   adminToken,
-  cartItems,
   destination,
 }: {
   shopifyDomain: string
@@ -152,148 +151,62 @@ async function calculateShippingWithAdmin({
   cartItems: any[]
   destination: Destination
 }) {
-  let draftOrderId: number | null = null
-
   try {
-    // Prepara line items
-    const lineItems = cartItems.map((item: any) => {
-      const variantId = item.variant_id || item.id
-      
-      if (!variantId) {
-        console.error("[calculateShippingWithAdmin] Item senza variant_id:", item)
-        return null
-      }
+    console.log(`[calculateShippingWithAdmin] → Lettura shipping zones per ${destination.countryCode}`)
 
-      // Pulisci variant_id (rimuovi gid:// se presente)
-      let cleanVariantId = variantId
-      if (typeof variantId === "string" && variantId.startsWith("gid://")) {
-        cleanVariantId = variantId.split("/").pop()
-      }
-
-      return {
-        variant_id: cleanVariantId,
-        quantity: item.quantity || 1,
-      }
-    }).filter(Boolean)
-
-    if (lineItems.length === 0) {
-      throw new Error("Nessun line item valido trovato")
-    }
-
-    console.log(`[calculateShippingWithAdmin] → Creazione draft order con ${lineItems.length} prodotti`)
-
-    // 1. CREA DRAFT ORDER
-    const createResponse = await fetch(
-      `https://${shopifyDomain}/admin/api/2024-10/draft_orders.json`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": adminToken,
-        },
-        body: JSON.stringify({
-          draft_order: {
-            line_items: lineItems,
-            shipping_address: {
-              first_name: "Customer",
-              last_name: "Checkout",
-              address1: destination.address1 || "Indirizzo 1",
-              city: destination.city || "Roma",
-              province: destination.province || "",
-              country_code: destination.countryCode || "IT",
-              zip: destination.postalCode || "00100",
-            },
-            use_customer_default_address: false,
-          },
-        }),
-      }
-    )
-
-    if (!createResponse.ok) {
-      const errorText = await createResponse.text()
-      console.error("[calculateShippingWithAdmin] ✗ Errore creazione draft order:", createResponse.status)
-      console.error("Dettagli:", errorText)
-      throw new Error(`Errore creazione draft order: ${createResponse.status}`)
-    }
-
-    const draftOrderResult = await createResponse.json()
-
-    if (!draftOrderResult.draft_order?.id) {
-      console.error("[calculateShippingWithAdmin] ✗ Draft order non creato")
-      return null
-    }
-
-    draftOrderId = draftOrderResult.draft_order.id
-    console.log(`[calculateShippingWithAdmin] ✓ Draft order creato: ${draftOrderId}`)
-
-    // 2. OTTIENI SHIPPING RATES
-    const ratesResponse = await fetch(
-      `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}/shipping_rates.json`,
+    const res = await fetch(
+      `https://${shopifyDomain}/admin/api/2024-10/shipping_zones.json`,
       {
         method: "GET",
         headers: {
-          "Content-Type": "application/json",
           "X-Shopify-Access-Token": adminToken,
         },
       }
     )
 
-    if (!ratesResponse.ok) {
-      const errorText = await ratesResponse.text()
-      console.error("[calculateShippingWithAdmin] ✗ Errore recupero shipping rates:", ratesResponse.status)
-      console.error("Dettagli:", errorText)
-      throw new Error(`Errore recupero shipping rates: ${ratesResponse.status}`)
+    if (!res.ok) {
+      throw new Error(`Errore shipping_zones: ${res.status}`)
     }
 
-    const ratesResult = await ratesResponse.json()
-    const shippingRates = ratesResult.shipping_rates || []
+    const data = await res.json()
+    const zones: any[] = data.shipping_zones || []
 
-    console.log(
-      `[calculateShippingWithAdmin] ✓ Trovate ${shippingRates.length} tariffe:`,
-      shippingRates.map((r: any) => `${r.title}: €${r.price}`)
+    const countryUpper = (destination.countryCode || "IT").toUpperCase()
+
+    // Trova la zona che include il paese del cliente
+    const matchingZone = zones.find((zone: any) =>
+      zone.countries?.some((c: any) => c.code?.toUpperCase() === countryUpper)
     )
 
-    // 3. ELIMINA DRAFT ORDER (pulizia)
-    if (draftOrderId) {
-      await fetch(
-        `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}.json`,
-        {
-          method: "DELETE",
-          headers: { "X-Shopify-Access-Token": adminToken },
-        }
-      )
-      console.log(`[calculateShippingWithAdmin] ✓ Draft order ${draftOrderId} eliminato`)
-    }
-
-    if (shippingRates.length === 0) {
-      console.warn("[calculateShippingWithAdmin] ⚠ Nessuna shipping rate disponibile")
+    if (!matchingZone) {
+      console.warn(`[calculateShippingWithAdmin] ⚠ Nessuna zona trovata per ${countryUpper}`)
       return null
     }
 
-    return shippingRates.map((rate: any) => ({
-      handle: rate.handle || rate.id || "standard",
-      title: rate.title || "Spedizione Standard",
-      price: rate.price || "0.00",
-    }))
+    // Prendi le price-based o weight-based rates dalla zona
+    const priceRates: any[] = matchingZone.price_based_shipping_rates || []
+    const weightRates: any[] = matchingZone.weight_based_shipping_rates || []
+    const carrierRates: any[] = matchingZone.carrier_shipping_rate_providers || []
+
+    const allRates = [
+      ...priceRates.map((r: any) => ({ title: r.name, price: r.price, handle: "price" })),
+      ...weightRates.map((r: any) => ({ title: r.name, price: r.price, handle: "weight" })),
+      ...carrierRates.map((r: any) => ({ title: r.name || "Spedizione", price: "5.90", handle: "carrier" })),
+    ]
+
+    if (allRates.length === 0) {
+      console.warn(`[calculateShippingWithAdmin] ⚠ Zona trovata ma nessuna tariffa per ${countryUpper}`)
+      return null
+    }
+
+    console.log(
+      `[calculateShippingWithAdmin] ✓ Trovate ${allRates.length} tariffe in zona "${matchingZone.name}":`,
+      allRates.map((r: any) => `${r.title}: €${r.price}`)
+    )
+
+    return allRates
   } catch (error: any) {
     console.error("[calculateShippingWithAdmin] ✗ Errore:", error)
-    
-    // Cleanup: elimina draft order se esiste
-    if (draftOrderId) {
-      try {
-        await fetch(
-          `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}.json`,
-          {
-            method: "DELETE",
-            headers: { "X-Shopify-Access-Token": adminToken },
-          }
-        )
-        console.log(`[calculateShippingWithAdmin] ✓ Draft order ${draftOrderId} eliminato (cleanup)`)
-      } catch (cleanupError) {
-        console.error("[calculateShippingWithAdmin] ✗ Errore cleanup:", cleanupError)
-      }
-    }
-    
     throw error
   }
 }

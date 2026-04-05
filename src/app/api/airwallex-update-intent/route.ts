@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     const token = await getAuthToken(config.airwallex)
     const baseUrl = BASE_URLS[config.airwallex.environment]
 
-    const res = await fetch(`${baseUrl}/api/v1/pa/payment_intents/${intentId}`, {
+    const res = await fetch(`${baseUrl}/api/v1/pa/payment_intents/${intentId}/update`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
